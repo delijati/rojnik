@@ -1,0 +1,20 @@
+agent.db
+agent.log
+*.json
+
+*.csv
+### Python ###
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+src/*.egg-info/
+
+# Unit test / coverage reports
+htmlcov/
+.coverage
+.coverage.*
+.cache
+*.cover
+.hypothesis/gst
+.pytest_cache/

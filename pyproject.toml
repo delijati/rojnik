@@ -1,0 +1,98 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-harness"
+version = "0.1.0"
+description = "A minimal, from-scratch async agentic harness with multi-agent support"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Your Name", email = "you@example.com" }]
+keywords = ["agent", "llm", "openai", "agentic", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Framework :: AsyncIO",
+]
+
+dependencies = [
+    "openai>=1.0",
+    "pydantic>=2.0",
+    "sqlalchemy>=2.0",
+    "aiosqlite>=0.19",
+    "loguru>=0.7",
+    "tiktoken>=0.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "hatchling",
+    "textual>=8.0",
+]
+# Install every supported provider's SDK alongside the core package.
+# Only install what you actually use.
+anthropic = ["anthropic>=0.30"]
+deepseek  = []          # DeepSeek uses the openai SDK — no extra install needed
+
+[project.urls]
+Repository = "https://github.com/your-org/agent-harness"
+Issues     = "https://github.com/your-org/agent-harness/issues"
+
+# ---------------------------------------------------------------------------
+# Hatch build — src layout: package lives under src/
+# ---------------------------------------------------------------------------
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_harness"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/",
+    "tests/",
+    "examples/",
+    "README.md",
+    "pyproject.toml",
+]
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths   = ["tests"]
+pythonpath  = ["src"]
+
+# ---------------------------------------------------------------------------
+# Ruff (linter / formatter) — optional, install with `pip install ruff`
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4"]
+ignore = ["E501"]  # line length handled by formatter
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent_harness"]
+
+# ---------------------------------------------------------------------------
+# Mypy (static type checker) — optional, install with `pip install mypy`
+# ---------------------------------------------------------------------------
+
+[tool.mypy]
+python_version    = "3.11"
+strict            = false
+ignore_missing_imports = true
