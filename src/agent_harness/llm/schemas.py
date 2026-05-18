@@ -101,3 +101,38 @@ class ToolSchema(BaseModel):
 
     def to_openai_dict(self) -> dict[str, Any]:
         return self.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# Response format (structured output)
+# ---------------------------------------------------------------------------
+
+# ResponseFormat can be:
+#   - None                  → no constraint (default behaviour)
+#   - {"type": "json_object"}
+#   - {"type": "json_schema", "json_schema": {...}}
+#   - A Pydantic BaseModel subclass → auto-converted to json_schema
+ResponseFormat = type[BaseModel] | dict[str, Any] | None
+
+
+def normalize_response_format(fmt: ResponseFormat) -> dict[str, Any] | None:
+    """Convert a *ResponseFormat* value to the dict the OpenAI API expects.
+
+    - ``None``           → ``None`` (no constraint)
+    - ``dict``           → passed through unchanged
+    - Pydantic subclass  → ``{"type": "json_schema", "json_schema": {...}}``
+    """
+    if fmt is None:
+        return None
+    if isinstance(fmt, dict):
+        return fmt
+    if isinstance(fmt, type) and issubclass(fmt, BaseModel):
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": fmt.__name__,
+                "strict": True,
+                "schema": fmt.model_json_schema(),
+            },
+        }
+    raise TypeError(f"Unsupported response_format type: {type(fmt)!r}")

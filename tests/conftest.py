@@ -58,17 +58,31 @@ class MockLLMClient:
 
     Instantiate with a list of LLMResponse objects.  Each call to chat()
     pops and returns the next one.  Raises RuntimeError if exhausted.
+
+    When *on_chunk* is supplied the stub simulates streaming by calling
+    it once per character of the response content (if any).  The recorded
+    call dict includes ``response_format`` so tests can assert it was
+    forwarded correctly.
     """
 
     def __init__(self, responses: list[LLMResponse]) -> None:
         self._responses = list(responses)
         self.calls: list[dict] = []
 
-    async def chat(self, messages, tools=None):
-        self.calls.append({"messages": list(messages), "tools": tools})
+    async def chat(self, messages, tools=None, *, on_chunk=None, response_format=None):
+        self.calls.append({
+            "messages": list(messages),
+            "tools": tools,
+            "response_format": response_format,
+        })
         if not self._responses:
             raise RuntimeError("MockLLMClient: no more scripted responses")
-        return self._responses.pop(0)
+        resp = self._responses.pop(0)
+        # Simulate streaming: call on_chunk once per character of content
+        if on_chunk is not None and resp.content:
+            for ch in resp.content:
+                on_chunk(ch)
+        return resp
 
 
 # ---------------------------------------------------------------------------

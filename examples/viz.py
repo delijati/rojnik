@@ -144,6 +144,9 @@ STATUS_STYLE = {
     "max_iterations": "bold red",
 }
 
+# Statuses that represent a terminated-with-error run
+_ERROR_STATUSES = {"error", "max_iterations"}
+
 ROLE_STYLE = {
     "system":    ("dim",    "SYS "),
     "user":      ("cyan",   "USR "),
@@ -154,14 +157,55 @@ ROLE_STYLE = {
 
 def _status_badge(status: str) -> str:
     style = STATUS_STYLE.get(status, "white")
-    return f"[{style}]{status}[/]"
+    label = "max-iter" if status == "max_iterations" else status
+    return f"[{style}]{label}[/]"
 
 
 def _session_label(s: SessionRow) -> str:
-    badge = _status_badge(s.status)
-    tok   = f"[dim]{s.total_tokens:,} tok[/]"
-    dur   = f"[dim]{s.duration_s}[/]"
-    return f"[bold]{s.agent_name}[/]  {badge}  {tok}  {dur}"
+    """Single-line label used in the call tree."""
+    badge  = _status_badge(s.status)
+    tok    = f"[dim]{s.total_tokens:,} tok[/]"
+    dur    = f"[dim]{s.duration_s}[/]"
+    time_s = f"  [dim]{s.created_hm}[/]" if s.created_hm else ""
+    # Append a short error hint so it's readable inline in the tree
+    err_hint = ""
+    if s.status in _ERROR_STATUSES and s.result_preview:
+        hint = s.result_preview.replace("\n", " ")[:50]
+        err_hint = f"  [dim red]{hint}[/]"
+    return f"[bold]{s.agent_name}[/]  {badge}  {tok}  {dur}{time_s}{err_hint}"
+
+
+def _session_list_text(s: SessionRow) -> str:
+    """Multi-line rich text card for the session list panel."""
+    badge  = _status_badge(s.status)
+    tok    = f"[dim]{s.total_tokens:,} tok[/]"
+    dur    = f"[dim]{s.duration_s}[/]"
+    time_s = f"[dim]{s.created_hm}[/]  " if s.created_hm else ""
+
+    parts = [
+        f"{time_s}[bold]{s.agent_name}[/]  {badge}",
+        f"  {tok}  {dur}",
+    ]
+
+    if s.task_preview:
+        flat  = s.task_preview.replace("\n", " ")
+        short = flat[:60].rstrip() + ("…" if len(flat) > 60 else "")
+        parts.append(f"  [dim cyan]Task:[/] [dim]{short}[/]")
+
+    if s.result_preview:
+        flat  = s.result_preview.replace("\n", " ")
+        short = flat[:60].rstrip() + ("…" if len(flat) > 60 else "")
+        if s.status in _ERROR_STATUSES:
+            parts.append(f"  [bold red]Error:[/] [dim red]{short}[/]")
+        else:
+            parts.append(f"  [dim green]Result:[/] [dim]{short}[/]")
+    elif s.status in _ERROR_STATUSES:
+        parts.append(f"  [bold red]Error:[/] [dim red](no detail stored)[/]")
+
+    if s.status == "running" and not s.finished_at:
+        parts.append("  [yellow dim](abandoned — never closed)[/]")
+
+    return "\n".join(parts)
 
 
 def _truncate(text: str | None, width: int = 80) -> str:
@@ -211,7 +255,8 @@ class SessionPanel(Vertical):
         overflow-y: auto;
     }
     SessionPanel ListItem {
-        padding: 0 1;
+        padding: 0 1 1 1;
+        border-bottom: dashed $panel-lighten-1;
     }
     """
 
@@ -226,7 +271,7 @@ class SessionPanel(Vertical):
     def _make_items(self) -> list[ListItem]:
         items = []
         for s in self._sessions:
-            item = ListItem(Static(_session_label(s)))
+            item = ListItem(Static(_session_list_text(s)))
             item._session_id = s.id  # type: ignore[attr-defined]
             items.append(item)
         return items
@@ -323,7 +368,7 @@ class TreePanel(Vertical):
     def _expand_session(self, node: TreeNode, s: SessionRow) -> None:
         node.data["loaded"] = True  # type: ignore[index]
 
-        # task / result info lines
+        # task / result / error info lines
         if s.task_preview:
             task_text = s.task_preview.replace("\n", " ")
             node.add_leaf(
@@ -331,10 +376,16 @@ class TreePanel(Vertical):
                 data={"type": "text_leaf", "title": "Task", "text": s.task_preview},
             )
         if s.result_preview:
-            node.add_leaf(
-                f"[dim]Result:[/] {_truncate(s.result_preview, 90)}",
-                data={"type": "text_leaf", "title": "Result", "text": s.result_preview},
-            )
+            if s.status in _ERROR_STATUSES:
+                node.add_leaf(
+                    f"[bold red]Error:[/] {_truncate(s.result_preview, 90)}",
+                    data={"type": "text_leaf", "title": "Error", "text": s.result_preview},
+                )
+            else:
+                node.add_leaf(
+                    f"[dim]Result:[/] {_truncate(s.result_preview, 90)}",
+                    data={"type": "text_leaf", "title": "Result", "text": s.result_preview},
+                )
 
         # messages container
         msgs = load_messages(self._con, s.id)
@@ -517,14 +568,22 @@ class VizApp(App):
 
         if ntype == "session":
             s: SessionRow = data["row"]
+            finished = s.finished_at[11:16] if s.finished_at else None
+            fin_str  = f"  finished {finished}" if finished else "  [yellow](not closed)[/]"
             parts = [
                 f"[bold]{s.agent_name}[/]  {_status_badge(s.status)}"
-                f"  [dim]{s.total_tokens:,} tok  {s.duration_s}[/]",
+                f"  [dim]{s.total_tokens:,} tok  {s.duration_s}{fin_str}[/]",
             ]
-            if s.task_preview:
-                parts += ["", "[dim]── Task ──[/]", s.task_preview]
-            if s.result_preview:
-                parts += ["", "[dim]── Result ──[/]", s.result_preview]
+            if s.status in _ERROR_STATUSES:
+                err_text = s.result_preview or "(no detail stored)"
+                parts += ["", "[bold red]── Error ──[/]", f"[red]{err_text}[/]"]
+                parts += ["", "[dim]This run ended with an error and was not resumed.[/]",
+                          "[dim]Any work not yet delegated was skipped.[/]"]
+            else:
+                if s.task_preview:
+                    parts += ["", "[dim]── Task ──[/]", s.task_preview]
+                if s.result_preview:
+                    parts += ["", "[dim]── Result ──[/]", s.result_preview]
             pane.show_text("\n".join(parts))
 
         elif ntype == "text_leaf":

@@ -1,3 +1,6 @@
+chat.db
+chat.log
+noice.log
 agent.db
 agent.log
 *.json

@@ -22,7 +22,7 @@ Loop flow
 import asyncio
 import json
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from loguru import logger
 
@@ -30,6 +30,7 @@ from agent_harness.agent.state import RunState
 from agent_harness.config import settings
 from agent_harness.llm.schemas import (
     AssistantMessage,
+    ResponseFormat,
     ToolResultMessage,
     UserMessage,
 )
@@ -55,6 +56,9 @@ async def run_loop(
     store: MemoryStore,
     context_builder: ContextBuilder,
     max_iterations: int | None = None,
+    on_chunk: Callable[[str], None] | None = None,
+    on_tool_call: Callable[[str, str], None] | None = None,
+    response_format: ResponseFormat = None,
 ) -> str:
     """
     Execute the ReAct loop for one agent run.
@@ -68,6 +72,15 @@ async def run_loop(
     store:           MemoryStore for persistence.
     context_builder: Builds the token-trimmed message window.
     max_iterations:  Override the default from settings.
+    on_chunk:        If provided, streamed text tokens are forwarded here as
+                     they arrive.  Only called on ``finish_reason == "stop"``
+                     turns; tool-call turns produce no text stream.
+    on_tool_call:    If provided, called once per tool call just before
+                     dispatch with ``(tool_name, arguments_json)``.  Useful
+                     for real-time UI feedback.  Called for every agent in a
+                     multi-agent graph when stored on the Agent instance.
+    response_format: Optional structured-output constraint forwarded to the
+                     LLM on every call.  See ``LLMClient.chat()`` for details.
 
     Returns
     -------
@@ -108,7 +121,12 @@ async def run_loop(
         # LLM call
         # ----------------------------------------------------------------
         tools = tool_registry.schemas() if len(tool_registry) > 0 else None
-        response = await llm.chat(state.messages, tools)
+        response = await llm.chat(
+            state.messages,
+            tools,
+            on_chunk=on_chunk,
+            response_format=response_format,
+        )
         state.add_tokens(response.prompt_tokens, response.completion_tokens)
 
         # ----------------------------------------------------------------
@@ -156,6 +174,11 @@ async def run_loop(
                 session_id=state.session_id,
                 tools=[tc.name for tc in response.tool_calls],
             )
+
+            # Notify caller about each tool call before dispatching
+            if on_tool_call is not None:
+                for tc in response.tool_calls:
+                    on_tool_call(tc.name, tc.arguments)
 
             # Dispatch all tool calls in parallel
             # Set the context var so delegate_to_agent can read the session ID
@@ -208,11 +231,33 @@ async def run_loop(
             finish_reason=response.finish_reason,
             session_id=state.session_id,
         )
-        partial = response.content or f"[Stopped: {response.finish_reason}]"
+        partial = response.content or ""
         state.status = "error"
         state.result = partial
-        await store.close_session(state.session_id, status="error", result=partial)
-        return partial
+        await store.close_session(
+            state.session_id,
+            status="error",
+            result=partial,
+            total_tokens=state.total_tokens,
+        )
+        _reason_labels: dict[str, str] = {
+            "length": "token limit reached",
+            "content_filter": "content filtered by provider",
+        }
+        label = _reason_labels.get(response.finish_reason, response.finish_reason)
+        detail = f"  partial output: {partial[:200]}" if partial else ""
+        # Store a readable error string in the DB so visualisers can display it
+        error_msg = f"{label.capitalize()}{detail}"
+        await store.close_session(
+            state.session_id,
+            status="error",
+            result=error_msg,
+            total_tokens=state.total_tokens,
+        )
+        raise RuntimeError(
+            f"Agent '{state.agent_name}' stopped: {label}"
+            f" (finish_reason={response.finish_reason!r}){detail}"
+        )
 
     # ----------------------------------------------------------------
     # Max iterations exceeded
@@ -221,6 +266,7 @@ async def run_loop(
     await store.close_session(
         state.session_id,
         status="max_iterations",
+        result=f"Exceeded {limit} iterations",
         total_tokens=state.total_tokens,
     )
     logger.error(

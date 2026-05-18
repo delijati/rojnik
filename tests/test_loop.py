@@ -264,16 +264,178 @@ class TestMaxIterations:
 # ---------------------------------------------------------------------------
 
 class TestUnexpectedFinish:
-    async def test_length_finish_reason_returns_partial(self, store):
+    async def test_length_finish_reason_raises(self, store):
         from agent_harness.llm.schemas import LLMResponse
         llm = MockLLMClient([
             LLMResponse(finish_reason="length", content="truncated text", model="mock")
         ])
         state = await _make_state(store)
-        result = await run_loop(
-            state=state, task="x",
-            llm=llm, tool_registry=ToolRegistry(),
-            store=store, context_builder=ContextBuilder(),
-        )
-        assert result == "truncated text"
+        with pytest.raises(RuntimeError, match="token limit reached"):
+            await run_loop(
+                state=state, task="x",
+                llm=llm, tool_registry=ToolRegistry(),
+                store=store, context_builder=ContextBuilder(),
+            )
         assert state.status == "error"
+
+
+# ---------------------------------------------------------------------------
+# Streaming (on_chunk)
+# ---------------------------------------------------------------------------
+
+class TestStreaming:
+    async def test_on_chunk_receives_all_content(self, store):
+        """Chunks forwarded by on_chunk must concatenate to the full response."""
+        llm = MockLLMClient([stop_response("Hello world")])
+        state = await _make_state(store)
+        chunks: list[str] = []
+        result = await run_loop(
+            state=state,
+            task="say hello",
+            llm=llm,
+            tool_registry=ToolRegistry(),
+            store=store,
+            context_builder=ContextBuilder(),
+            on_chunk=chunks.append,
+        )
+        assert result == "Hello world"
+        assert "".join(chunks) == "Hello world"
+
+    async def test_on_chunk_not_called_for_tool_call_turn(self, store):
+        """on_chunk is only called when the LLM produces text, not on tool-call turns."""
+        @tool(description="const")
+        async def const() -> str:
+            return "result"
+
+        chunks: list[str] = []
+        llm = MockLLMClient([
+            tool_call_response([("c1", "const", "{}")]),  # no content → no on_chunk
+            stop_response("done"),
+        ])
+        state = await _make_state(store)
+        await run_loop(
+            state=state,
+            task="x",
+            llm=llm,
+            tool_registry=_registry_with(const),
+            store=store,
+            context_builder=ContextBuilder(),
+            on_chunk=chunks.append,
+        )
+        # Only the final "stop" response ("done") should produce chunks
+        assert "".join(chunks) == "done"
+
+    async def test_on_chunk_none_does_not_break_normal_flow(self, store):
+        """Passing on_chunk=None (the default) must behave identically to before."""
+        llm = MockLLMClient([stop_response("ok")])
+        state = await _make_state(store)
+        result = await run_loop(
+            state=state,
+            task="x",
+            llm=llm,
+            tool_registry=ToolRegistry(),
+            store=store,
+            context_builder=ContextBuilder(),
+            on_chunk=None,
+        )
+        assert result == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Structured output (response_format)
+# ---------------------------------------------------------------------------
+
+class TestResponseFormat:
+    async def test_response_format_forwarded_to_llm(self, store):
+        """response_format must appear verbatim in the recorded LLM call."""
+        from pydantic import BaseModel as BM
+
+        class MyOutput(BM):
+            answer: str
+
+        llm = MockLLMClient([stop_response('{"answer": "42"}')])
+        state = await _make_state(store)
+        await run_loop(
+            state=state,
+            task="x",
+            llm=llm,
+            tool_registry=ToolRegistry(),
+            store=store,
+            context_builder=ContextBuilder(),
+            response_format=MyOutput,
+        )
+        assert llm.calls[0]["response_format"] is MyOutput
+
+    async def test_response_format_none_by_default(self, store):
+        """When response_format is omitted the LLM call must receive None."""
+        llm = MockLLMClient([stop_response("x")])
+        state = await _make_state(store)
+        await run_loop(
+            state=state,
+            task="x",
+            llm=llm,
+            tool_registry=ToolRegistry(),
+            store=store,
+            context_builder=ContextBuilder(),
+        )
+        assert llm.calls[0]["response_format"] is None
+
+
+# ---------------------------------------------------------------------------
+# on_tool_call callback
+# ---------------------------------------------------------------------------
+
+class TestOnToolCall:
+    async def test_callback_fires_for_each_tool_call(self, store):
+        """on_tool_call must fire once per tool call with the correct name and args."""
+        @tool(description="add")
+        async def add(a: int, b: int) -> int:
+            return a + b
+
+        @tool(description="const")
+        async def const() -> str:
+            return "hello"
+
+        fired: list[tuple[str, str]] = []
+        llm = MockLLMClient([
+            tool_call_response([
+                ("c1", "add", '{"a":1,"b":2}'),
+                ("c2", "const", "{}"),
+            ]),
+            stop_response("done"),
+        ])
+        state = await _make_state(store)
+        await run_loop(
+            state=state,
+            task="x",
+            llm=llm,
+            tool_registry=_registry_with(add, const),
+            store=store,
+            context_builder=ContextBuilder(),
+            on_tool_call=lambda name, args: fired.append((name, args)),
+        )
+        assert len(fired) == 2
+        assert fired[0] == ("add", '{"a":1,"b":2}')
+        assert fired[1] == ("const", "{}")
+
+    async def test_callback_none_does_not_break_loop(self, store):
+        """Passing on_tool_call=None (the default) must not affect loop behaviour."""
+        @tool(description="noop")
+        async def noop() -> str:
+            return "x"
+
+        llm = MockLLMClient([
+            tool_call_response([("c1", "noop", "{}")]),
+            stop_response("ok"),
+        ])
+        state = await _make_state(store)
+        result = await run_loop(
+            state=state,
+            task="x",
+            llm=llm,
+            tool_registry=_registry_with(noop),
+            store=store,
+            context_builder=ContextBuilder(),
+            on_tool_call=None,
+        )
+        assert result == "ok"

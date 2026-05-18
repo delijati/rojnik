@@ -37,7 +37,7 @@ from loguru import logger
 from agent_harness.agent.loop import run_loop
 from agent_harness.agent.state import RunState
 from agent_harness.llm.client import LLMClient
-from agent_harness.llm.schemas import SystemMessage
+from agent_harness.llm.schemas import ResponseFormat, SystemMessage
 from agent_harness.memory.context import ContextBuilder
 from agent_harness.memory.store import MemoryStore
 from agent_harness.tools.registry import ToolRegistry
@@ -59,6 +59,11 @@ class Agent:
         Optional LLMClient override (defaults to a shared instance).
     max_iterations:
         Override the global max_iterations for this agent.
+    on_tool_call:
+        If provided, called once per tool call just before dispatch with
+        ``(tool_name, arguments_json)``.  Stored on the instance so it
+        fires for sub-agents too (sub-agents are called via
+        ``delegate_to_agent`` without extra kwargs).
     """
 
     def __init__(
@@ -68,10 +73,12 @@ class Agent:
         tools: list[Callable[..., Any]] | None = None,
         llm: LLMClient | None = None,
         max_iterations: int | None = None,
+        on_tool_call: Callable[[str, str], None] | None = None,
     ) -> None:
         self.name = name
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
+        self._on_tool_call = on_tool_call
 
         # Tool registry — populated from the tools list
         self.tool_registry = ToolRegistry()
@@ -99,6 +106,9 @@ class Agent:
         self,
         task: str,
         parent_session_id: str | None = None,
+        *,
+        on_chunk: Callable[[str], None] | None = None,
+        response_format: ResponseFormat = None,
     ) -> str:
         """
         Execute one task through the ReAct loop.
@@ -110,6 +120,12 @@ class Agent:
         parent_session_id:
             If this agent was spawned by another agent's delegate tool,
             pass the parent session ID for traceability in SQLite.
+        on_chunk:
+            If provided, streamed text tokens are forwarded here as they
+            arrive from the LLM.  See ``LLMClient.chat()`` for details.
+        response_format:
+            Optional structured-output constraint forwarded to the LLM on
+            every call.  See ``LLMClient.chat()`` for details.
 
         Returns
         -------
@@ -146,6 +162,9 @@ class Agent:
             store=store,
             context_builder=self._context_builder,
             max_iterations=self.max_iterations,
+            on_chunk=on_chunk,
+            on_tool_call=self._on_tool_call,
+            response_format=response_format,
         )
 
         logger.info(

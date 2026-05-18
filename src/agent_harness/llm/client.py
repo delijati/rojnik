@@ -13,7 +13,7 @@ The client is OpenAI-compatible and supports any provider that speaks the
 OpenAI Chat Completions API, including:
   - OpenAI          (default, base_url=None)
   - DeepSeek        (base_url="https://api.deepseek.com/v1")
-  - Local servers   (Ollama, LM Studio, vLLM — supply a custom base_url)
+  - Local servers   (llama.cpp — supply a custom base_url)
 
 All of these are driven by the global ``settings`` object (config.py), but
 every parameter can also be passed directly to the constructor so that a
@@ -23,7 +23,7 @@ caller can create a fully custom client without touching env vars.
 
 import asyncio
 import time
-from typing import Any
+from typing import Any, Callable
 
 from loguru import logger
 from openai import AsyncOpenAI, APIConnectionError, APIStatusError, RateLimitError
@@ -33,8 +33,10 @@ from agent_harness.llm.schemas import (
     AssistantMessage,
     LLMResponse,
     Message,
+    ResponseFormat,
     ToolCallPart,
     ToolSchema,
+    normalize_response_format,
 )
 
 
@@ -85,9 +87,8 @@ class LLMClient:
     base_url:
         Base URL of the Chat Completions endpoint.  Pass ``None`` to use the
         official OpenAI API.  Examples:
-          - DeepSeek:  "https://api.deepseek.com/v1"
-          - Ollama:    "http://localhost:11434/v1"
-          - LM Studio: "http://localhost:1234/v1"
+          - DeepSeek:   "https://api.deepseek.com/v1"
+          - llama.cpp:  "http://localhost:8080/v1"
         Defaults to ``settings.get_base_url()``.
     max_tokens:
         Maximum tokens in the completion.  Defaults to ``settings.max_tokens``.
@@ -133,26 +134,73 @@ class LLMClient:
             base_url=resolved_base_url or "https://api.openai.com/v1",
         )
 
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
     async def chat(
         self,
         messages: list[Message],
         tools: list[ToolSchema] | None = None,
+        *,
+        on_chunk: Callable[[str], None] | None = None,
+        response_format: ResponseFormat = None,
     ) -> LLMResponse:
         """
         Send a chat completion request and return a normalised LLMResponse.
 
-        Retries up to max_retries times on rate-limit and connection errors.
+        Parameters
+        ----------
+        messages:
+            Conversation history to send.
+        tools:
+            Optional list of tool schemas the model may call.
+        on_chunk:
+            If provided, enables **streaming mode**.  The callable is invoked
+            once per text token as the model streams its reply.  No retry is
+            performed once streaming has started; a single attempt is made.
+        response_format:
+            Optional structured-output constraint.  May be:
+
+              - ``None``                    – no constraint (default).
+              - ``dict``                    – passed through as-is
+                                              (e.g. ``{"type": "json_object"}``).
+              - Pydantic ``BaseModel`` subclass – auto-converted to a
+                ``json_schema`` descriptor with ``strict=True``.
+
+        Notes
+        -----
+        Retry logic (up to *max_retries* attempts with exponential back-off)
+        applies only in **blocking** mode (``on_chunk=None``).  In streaming
+        mode a single attempt is made; if the stream errors mid-way the
+        exception propagates to the caller.
         """
         tools_payload = [t.to_openai_dict() for t in tools] if tools else None
         openai_messages = _messages_to_openai(messages)
+        fmt = normalize_response_format(response_format)
 
         logger.debug(
             "llm.request",
             model=self._model,
             n_messages=len(openai_messages),
             n_tools=len(tools_payload) if tools_payload else 0,
+            streaming=on_chunk is not None,
         )
 
+        if on_chunk is not None:
+            return await self._chat_stream(openai_messages, tools_payload, fmt, on_chunk)
+        return await self._chat_blocking(openai_messages, tools_payload, fmt)
+
+    # ------------------------------------------------------------------
+    # Private: blocking mode (with retry)
+    # ------------------------------------------------------------------
+
+    async def _chat_blocking(
+        self,
+        openai_messages: list[dict[str, Any]],
+        tools_payload: list[dict[str, Any]] | None,
+        response_format: dict[str, Any] | None,
+    ) -> LLMResponse:
         last_error: Exception | None = None
         for attempt in range(1, self._max_retries + 2):  # +2 so last attempt is attempt N+1
             t0 = time.perf_counter()
@@ -165,6 +213,8 @@ class LLMClient:
                 if tools_payload:
                     kwargs["tools"] = tools_payload
                     kwargs["tool_choice"] = "auto"
+                if response_format is not None:
+                    kwargs["response_format"] = response_format
 
                 response = await self._client.chat.completions.create(**kwargs)
 
@@ -246,3 +296,114 @@ class LLMClient:
 
         logger.error("llm.max_retries_exceeded", max_retries=self._max_retries)
         raise RuntimeError(f"LLM call failed after {self._max_retries} retries") from last_error
+
+    # ------------------------------------------------------------------
+    # Private: streaming mode (single attempt, no mid-stream retry)
+    # ------------------------------------------------------------------
+
+    async def _chat_stream(
+        self,
+        openai_messages: list[dict[str, Any]],
+        tools_payload: list[dict[str, Any]] | None,
+        response_format: dict[str, Any] | None,
+        on_chunk: Callable[[str], None],
+    ) -> LLMResponse:
+        t0 = time.perf_counter()
+
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": openai_messages,
+            "max_tokens": self._max_tokens,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if tools_payload:
+            kwargs["tools"] = tools_payload
+            kwargs["tool_choice"] = "auto"
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+
+        # Accumulators
+        content_parts: list[str] = []
+        finish_reason: str = "stop"
+        model_name: str = self._model
+        prompt_tokens: int = 0
+        completion_tokens: int = 0
+        total_tokens: int = 0
+
+        # Tool-call accumulation: delta index → {id, name, argument chunks}
+        tc_accum: dict[int, dict[str, Any]] = {}
+
+        stream = await self._client.chat.completions.create(**kwargs)
+        async for chunk in stream:
+            # Usage arrives in the final synthetic chunk when stream_options is set
+            if chunk.usage:
+                prompt_tokens = chunk.usage.prompt_tokens or 0
+                completion_tokens = chunk.usage.completion_tokens or 0
+                total_tokens = chunk.usage.total_tokens or 0
+
+            if chunk.model:
+                model_name = chunk.model
+
+            if not chunk.choices:
+                continue
+
+            choice = chunk.choices[0]
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+
+            delta = choice.delta
+
+            # Text content
+            if delta.content:
+                content_parts.append(delta.content)
+                on_chunk(delta.content)
+
+            # Tool-call deltas (indexed; accumulate id, name, argument fragments)
+            if delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in tc_accum:
+                        tc_accum[idx] = {"id": "", "name": "", "arguments": []}
+                    if tc_delta.id:
+                        tc_accum[idx]["id"] = tc_delta.id
+                    if tc_delta.function:
+                        if tc_delta.function.name:
+                            tc_accum[idx]["name"] = tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            tc_accum[idx]["arguments"].append(tc_delta.function.arguments)
+
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+
+        # Assemble tool calls (preserve original index order)
+        tool_calls: list[ToolCallPart] = [
+            ToolCallPart(
+                id=tc["id"],
+                name=tc["name"],
+                arguments="".join(tc["arguments"]),
+            )
+            for tc in (tc_accum[i] for i in sorted(tc_accum))
+        ]
+
+        content = "".join(content_parts) if content_parts else None
+
+        llm_response = LLMResponse(
+            finish_reason=finish_reason,  # type: ignore[arg-type]
+            content=content,
+            tool_calls=tool_calls,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            model=model_name,
+        )
+
+        logger.debug(
+            "llm.response",
+            finish_reason=finish_reason,
+            n_tool_calls=len(tool_calls),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            latency_ms=latency_ms,
+            streaming=True,
+        )
+        return llm_response
