@@ -43,6 +43,7 @@ dev = [
 # Only install what you actually use.
 anthropic = ["anthropic>=0.30"]
 deepseek  = []          # DeepSeek uses the openai SDK — no extra install needed
+mcp       = ["mcp>=1.0"]
 
 [project.urls]
 Repository = "https://github.com/your-org/agent-harness"
