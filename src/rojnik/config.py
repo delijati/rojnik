@@ -1,5 +1,5 @@
 """
-Central configuration for the agent harness.
+Central configuration for the rojnik.
 All settings can be overridden via environment variables.
 
 Provider support
@@ -133,7 +133,7 @@ class Settings:
         if self.provider == "openai" and not self.openai_api_key:
             raise ValueError(
                 "OPENAI_API_KEY environment variable is not set. "
-                "Export it before running the agent harness, "
+                "Export it before running the rojnik, "
                 "or set AGENT_PROVIDER=deepseek / AGENT_PROVIDER=local."
             )
         if self.provider == "deepseek" and not (self.deepseek_api_key or self.api_key):

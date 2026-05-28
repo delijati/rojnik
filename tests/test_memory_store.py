@@ -3,14 +3,14 @@
 
 import pytest
 
-from agent_harness.llm.schemas import (
+from rojnik.llm.schemas import (
     AssistantMessage,
     SystemMessage,
     ToolCallPart,
     ToolResultMessage,
     UserMessage,
 )
-from agent_harness.memory.store import MemoryStore
+from rojnik.memory.store import MemoryStore
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ class TestSessions:
 
     async def test_close_session_updates_status(self, store):
         from sqlalchemy import select
-        from agent_harness.memory.models import Session
+        from rojnik.memory.models import Session
 
         sid = await store.create_session("agent_a")
         await store.close_session(sid, status="completed", result="done", total_tokens=42)
@@ -44,7 +44,7 @@ class TestSessions:
 
     async def test_close_session_stores_result_preview(self, store):
         from sqlalchemy import select
-        from agent_harness.memory.models import Session
+        from rojnik.memory.models import Session
 
         sid = await store.create_session("agent_a")
         await store.close_session(sid, result="the answer is 42")
@@ -125,7 +125,7 @@ class TestMessages:
 class TestToolResults:
     async def test_save_tool_result_success(self, store):
         from sqlalchemy import select
-        from agent_harness.memory.models import ToolResult
+        from rojnik.memory.models import ToolResult
 
         sid = await store.create_session("a")
         await store.save_tool_result(
@@ -149,7 +149,7 @@ class TestToolResults:
 
     async def test_save_tool_result_with_error(self, store):
         from sqlalchemy import select
-        from agent_harness.memory.models import ToolResult
+        from rojnik.memory.models import ToolResult
 
         sid = await store.create_session("a")
         await store.save_tool_result(

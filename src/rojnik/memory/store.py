@@ -25,8 +25,8 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from agent_harness.config import settings
-from agent_harness.llm.schemas import (
+from rojnik.config import settings
+from rojnik.llm.schemas import (
     AssistantMessage,
     Message,
     SystemMessage,
@@ -34,7 +34,7 @@ from agent_harness.llm.schemas import (
     ToolResultMessage,
     UserMessage,
 )
-from agent_harness.memory.models import Base, DBMessage, Session, ToolResult
+from rojnik.memory.models import Base, DBMessage, Session, ToolResult
 
 
 def _new_id() -> str:

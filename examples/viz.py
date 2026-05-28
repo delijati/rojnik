@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-viz.py — terminal call-tree visualiser for agent-harness SQLite runs.
+viz.py — terminal call-tree visualiser for rojnik SQLite runs.
 
 Usage
 -----
@@ -497,7 +497,7 @@ class ContentPane(Vertical):
 # ---------------------------------------------------------------------------
 
 class VizApp(App):
-    TITLE = "agent-harness · call tree"
+    TITLE = "rojnik · call tree"
     CSS = """
     Screen {
         background: $surface-darken-1;
@@ -640,7 +640,7 @@ class VizApp(App):
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Terminal call-tree visualiser for agent-harness SQLite runs."
+        description="Terminal call-tree visualiser for rojnik SQLite runs."
     )
     parser.add_argument(
         "--db",

@@ -16,7 +16,7 @@ so any agent can spawn any other by name.
 
 Usage
 -----
-    from agent_harness.agent.agent import Agent, AgentRegistry
+    from rojnik.agent.agent import Agent, AgentRegistry
 
     file_agent = Agent(
         name="file_reader",
@@ -34,13 +34,13 @@ from typing import Callable, Any
 
 from loguru import logger
 
-from agent_harness.agent.loop import run_loop
-from agent_harness.agent.state import RunState
-from agent_harness.llm.client import LLMClient
-from agent_harness.llm.schemas import ResponseFormat, SystemMessage
-from agent_harness.memory.context import ContextBuilder
-from agent_harness.memory.store import MemoryStore
-from agent_harness.tools.registry import ToolRegistry
+from rojnik.agent.loop import run_loop
+from rojnik.agent.state import RunState
+from rojnik.llm.client import LLMClient
+from rojnik.llm.schemas import ResponseFormat, SystemMessage
+from rojnik.memory.context import ContextBuilder
+from rojnik.memory.store import MemoryStore
+from rojnik.tools.registry import ToolRegistry
 
 
 class Agent:

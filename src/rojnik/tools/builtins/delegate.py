@@ -11,8 +11,8 @@ Agent(tools=[..., make_delegate_tool(registry)]).
 
 Usage
 -----
-    from agent_harness.agent.agent import AgentRegistry
-    from agent_harness.tools.builtins.delegate import make_delegate_tool
+    from rojnik.agent.agent import AgentRegistry
+    from rojnik.tools.builtins.delegate import make_delegate_tool
 
     registry = AgentRegistry()
     registry.register(file_agent)
@@ -47,10 +47,10 @@ from typing import TYPE_CHECKING, Callable, Any
 
 from loguru import logger
 
-from agent_harness.tools.base import tool
+from rojnik.tools.base import tool
 
 if TYPE_CHECKING:
-    from agent_harness.agent.agent import AgentRegistry
+    from rojnik.agent.agent import AgentRegistry
 
 # Context variable: the run_loop sets this before dispatching tool calls.
 # The delegate tool reads it to wire up parent_session_id in SQLite.

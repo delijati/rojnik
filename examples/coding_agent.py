@@ -1,5 +1,5 @@
 """
-Coding agent example — demonstrates the full multi-agent harness with
+Coding agent example — demonstrates the full multi-rojnik with
 support for OpenAI, DeepSeek, and any local OpenAI-compatible LLM server.
 
 Architecture
@@ -52,7 +52,7 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Provider / model / key must be set in the environment BEFORE agent_harness
+# Provider / model / key must be set in the environment BEFORE rojnik
 # is imported, because config.py creates a module-level singleton at import
 # time.  We parse CLI args first, push them into os.environ, then import.
 # ---------------------------------------------------------------------------
@@ -131,14 +131,14 @@ _apply_args_to_env(_args)
 
 sys.path.insert(0, "/work")
 
-import agent_harness  # noqa: F401 — triggers logging setup  # noqa: E402
+import rojnik  # noqa: F401 — triggers logging setup  # noqa: E402
 
-from agent_harness.agent.agent import Agent, AgentRegistry  # noqa: E402
-from agent_harness.llm.client import LLMClient  # noqa: E402
-from agent_harness.mcp import mcp_to_tools  # noqa: E402
-from agent_harness.tools.builtins.delegate import make_delegate_tool  # noqa: E402
-from agent_harness.tools.builtins.files import list_directory, read_file  # noqa: E402
-from agent_harness.tools.builtins.shell import shell_exec  # noqa: E402
+from rojnik.agent.agent import Agent, AgentRegistry  # noqa: E402
+from rojnik.llm.client import LLMClient  # noqa: E402
+from rojnik.mcp import mcp_to_tools  # noqa: E402
+from rojnik.tools.builtins.delegate import make_delegate_tool  # noqa: E402
+from rojnik.tools.builtins.files import list_directory, read_file  # noqa: E402
+from rojnik.tools.builtins.shell import shell_exec  # noqa: E402
 
 from mcp import ClientSession  # noqa: E402
 from mcp.client.stdio import StdioServerParameters, stdio_client  # noqa: E402
@@ -223,7 +223,7 @@ _DEFAULT_TASK = (
 
 
 async def main() -> None:
-    from agent_harness.config import settings
+    from rojnik.config import settings
 
     task = " ".join(_args.task) if _args.task else _DEFAULT_TASK
     cmd = _args.mcp_server or _DEFAULT_MCP_CMD

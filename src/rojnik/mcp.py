@@ -1,13 +1,13 @@
 """
-agent_harness.mcp — MCP (Model Context Protocol) bridge.
+rojnik.mcp — MCP (Model Context Protocol) bridge.
 
-Converts tools exposed by any MCP server into agent-harness @tool-compatible
+Converts tools exposed by any MCP server into rojnik @tool-compatible
 callables that can be registered directly with a ToolRegistry or passed to an
 Agent.
 
 Usage
 -----
-    from agent_harness.mcp import mcp_to_tools
+    from rojnik.mcp import mcp_to_tools
 
     # inside an async function, with a live ClientSession:
     tools = await mcp_to_tools(session)
@@ -31,14 +31,14 @@ try:
     from mcp import types as mcp_types
 except ImportError as _err:
     raise ImportError(
-        "agent_harness.mcp requires the 'mcp' package.  "
+        "rojnik.mcp requires the 'mcp' package.  "
         "Install it with:  pip install mcp\n"
-        "Or:  pip install 'agent-harness[mcp]'"
+        "Or:  pip install 'rojnik[mcp]'"
     ) from _err
 
 from typing import Any, Callable
 
-from agent_harness.llm.schemas import ToolFunctionSchema, ToolParameterSchema, ToolSchema
+from rojnik.llm.schemas import ToolFunctionSchema, ToolParameterSchema, ToolSchema
 
 
 def _mcp_tool_to_schema(t: mcp_types.Tool) -> ToolSchema:
@@ -92,7 +92,7 @@ def _make_mcp_caller(session: ClientSession, tool_name: str) -> Callable:
 async def mcp_to_tools(session: ClientSession) -> list[Callable]:
     """
     Discover all tools exposed by an initialised MCP session and return them
-    as a list of agent-harness ``@tool``-compatible callables.
+    as a list of rojnik ``@tool``-compatible callables.
 
     Parameters
     ----------

@@ -1,10 +1,10 @@
-"""Tests for normalize_response_format() in agent_harness.llm.schemas."""
+"""Tests for normalize_response_format() in rojnik.llm.schemas."""
 
 
 import pytest
 from pydantic import BaseModel
 
-from agent_harness.llm.schemas import normalize_response_format
+from rojnik.llm.schemas import normalize_response_format
 
 
 class TestNormalizeResponseFormat:

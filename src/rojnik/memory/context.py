@@ -22,9 +22,9 @@ from loguru import logger
 
 import tiktoken
 
-from agent_harness.config import settings
-from agent_harness.llm.schemas import Message, SystemMessage
-from agent_harness.memory.store import MemoryStore
+from rojnik.config import settings
+from rojnik.llm.schemas import Message, SystemMessage
+from rojnik.memory.store import MemoryStore
 
 
 def _count_tokens(text: str, encoder: tiktoken.Encoding) -> int:

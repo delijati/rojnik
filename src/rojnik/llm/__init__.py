@@ -1,5 +1,5 @@
-from agent_harness.llm.client import LLMClient
-from agent_harness.llm.schemas import (
+from rojnik.llm.client import LLMClient
+from rojnik.llm.schemas import (
     AssistantMessage,
     LLMResponse,
     Message,

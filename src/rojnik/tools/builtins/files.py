@@ -5,7 +5,7 @@ Built-in file system tools: read_file and list_directory.
 
 import os
 
-from agent_harness.tools.base import tool
+from rojnik.tools.base import tool
 
 
 @tool(description=(

@@ -26,21 +26,21 @@ from typing import TYPE_CHECKING, Callable
 
 from loguru import logger
 
-from agent_harness.agent.state import RunState
-from agent_harness.config import settings
-from agent_harness.llm.schemas import (
+from rojnik.agent.state import RunState
+from rojnik.config import settings
+from rojnik.llm.schemas import (
     AssistantMessage,
     ResponseFormat,
     ToolResultMessage,
     UserMessage,
 )
-from agent_harness.memory.context import ContextBuilder
-from agent_harness.memory.store import MemoryStore
-from agent_harness.tools.builtins.delegate import current_session_id
+from rojnik.memory.context import ContextBuilder
+from rojnik.memory.store import MemoryStore
+from rojnik.tools.builtins.delegate import current_session_id
 
 if TYPE_CHECKING:
-    from agent_harness.llm.client import LLMClient
-    from agent_harness.tools.registry import ToolRegistry
+    from rojnik.llm.client import LLMClient
+    from rojnik.tools.registry import ToolRegistry
 
 
 class MaxIterationsError(Exception):

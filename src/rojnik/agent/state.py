@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from agent_harness.llm.schemas import Message
+from rojnik.llm.schemas import Message
 
 
 RunStatus = Literal["running", "completed", "error", "max_iterations"]

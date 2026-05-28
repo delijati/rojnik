@@ -16,8 +16,8 @@ from typing import Any
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitError
 
 from loguru import logger
-from agent_harness.config import settings
-from agent_harness.llm.schemas import (
+from rojnik.config import settings
+from rojnik.llm.schemas import (
     AssistantMessage,
     LLMResponse,
     Message,

@@ -30,7 +30,7 @@
 # Prerequisites
 # -------------
 #   bwrap   (bubblewrap) — https://github.com/containers/bubblewrap
-#   Python venv at /work/venv with agent_harness installed (pip install -e .)
+#   Python venv at /work/venv with rojnik installed (pip install -e .)
 
 set -euo pipefail
 

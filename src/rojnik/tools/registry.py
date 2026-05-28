@@ -20,7 +20,7 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from agent_harness.llm.schemas import ToolCallPart, ToolSchema
+from rojnik.llm.schemas import ToolCallPart, ToolSchema
 
 
 class ToolNotFoundError(Exception):

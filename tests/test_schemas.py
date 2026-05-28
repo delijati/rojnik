@@ -4,7 +4,7 @@
 import pytest
 from pydantic import ValidationError
 
-from agent_harness.llm.schemas import (
+from rojnik.llm.schemas import (
     AssistantMessage,
     LLMResponse,
     SystemMessage,

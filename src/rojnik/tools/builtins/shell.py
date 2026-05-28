@@ -14,7 +14,7 @@ import os
 
 from loguru import logger
 
-from agent_harness.tools.base import tool
+from rojnik.tools.base import tool
 
 
 @tool(description=(

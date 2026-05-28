@@ -5,8 +5,8 @@ import asyncio
 import os
 import pytest
 
-from agent_harness.tools.builtins.files import list_directory, read_file
-from agent_harness.tools.builtins.shell import shell_exec
+from rojnik.tools.builtins.files import list_directory, read_file
+from rojnik.tools.builtins.shell import shell_exec
 
 
 # ---------------------------------------------------------------------------

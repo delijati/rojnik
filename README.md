@@ -1,4 +1,4 @@
-# agent-harness
+# rojnik
 
 A minimal, from-scratch async agentic harness in Python. No LangChain. No LangGraph. Just OpenAI, Pydantic, SQLAlchemy, and Loguru — wired together deliberately.
 
@@ -120,13 +120,13 @@ orchestrator.run_loop
 
 ```bash
 # From source (editable, for development)
-git clone https://github.com/your-org/agent-harness
-cd agent-harness
+git clone https://github.com/your-org/rojnik
+cd rojnik
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
 # From PyPI (once published)
-pip install agent-harness
+pip install rojnik
 ```
 
 Set your API key for the provider you intend to use:
@@ -162,9 +162,9 @@ export AGENT_LOG_FILE=agent.log
 
 ```python
 import asyncio
-from agent_harness.agent.agent import Agent
-from agent_harness.tools.builtins.files import read_file, list_directory
-from agent_harness.tools.builtins.shell import shell_exec
+from rojnik.agent.agent import Agent
+from rojnik.tools.builtins.files import read_file, list_directory
+from rojnik.tools.builtins.shell import shell_exec
 
 agent = Agent(
     name="coder",
@@ -180,10 +180,10 @@ print(result)
 
 ```python
 import asyncio
-from agent_harness.agent.agent import Agent, AgentRegistry
-from agent_harness.tools.builtins.files import read_file, list_directory
-from agent_harness.tools.builtins.shell import shell_exec
-from agent_harness.tools.builtins.delegate import make_delegate_tool
+from rojnik.agent.agent import Agent, AgentRegistry
+from rojnik.tools.builtins.files import read_file, list_directory
+from rojnik.tools.builtins.shell import shell_exec
+from rojnik.tools.builtins.delegate import make_delegate_tool
 
 # Specialist agents
 file_agent = Agent(
@@ -217,7 +217,7 @@ print(result)
 ### Custom tool
 
 ```python
-from agent_harness.tools.base import tool
+from rojnik.tools.base import tool
 
 @tool(description="Fetch the title of a web page")
 async def fetch_title(url: str) -> str:
@@ -245,7 +245,7 @@ AGENT_PROVIDER=deepseek DEEPSEEK_API_KEY=sk-... python examples/coding_agent.py
 ```
 
 ```python
-from agent_harness.llm.client import LLMClient
+from rojnik.llm.client import LLMClient
 
 llm = LLMClient(
     api_key="sk-...",
@@ -272,7 +272,7 @@ AGENT_MODEL=qwen2.5-coder \
 ```
 
 ```python
-from agent_harness.llm.client import LLMClient
+from rojnik.llm.client import LLMClient
 
 llm = LLMClient(
     model="qwen2.5-coder",
@@ -289,7 +289,7 @@ llm = LLMClient(
 
 ### Adapter
 
-Create a thin adapter that maps terminal-bench's task API to `agent_harness.Agent.run()`:
+Create a thin adapter that maps terminal-bench's task API to `rojnik.Agent.run()`:
 
 ```python
 # examples/terminal_bench_adapter.py
@@ -297,9 +297,9 @@ import asyncio
 import json
 from pathlib import Path
 
-from agent_harness.agent.agent import Agent
-from agent_harness.tools.builtins.files import list_directory, read_file
-from agent_harness.tools.builtins.shell import shell_exec
+from rojnik.agent.agent import Agent
+from rojnik.tools.builtins.files import list_directory, read_file
+from rojnik.tools.builtins.shell import shell_exec
 
 
 def make_coding_agent() -> Agent:

@@ -4,9 +4,9 @@
 import json
 import pytest
 
-from agent_harness.llm.schemas import ToolCallPart
-from agent_harness.tools.base import tool
-from agent_harness.tools.registry import ToolNotFoundError, ToolRegistry
+from rojnik.llm.schemas import ToolCallPart
+from rojnik.tools.base import tool
+from rojnik.tools.registry import ToolNotFoundError, ToolRegistry
 
 
 # ---------------------------------------------------------------------------

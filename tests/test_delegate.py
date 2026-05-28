@@ -3,9 +3,9 @@
 
 import pytest
 
-from agent_harness.agent.agent import Agent, AgentRegistry
-from agent_harness.tools.builtins.delegate import current_session_id, make_delegate_tool
-from agent_harness.tools.registry import ToolRegistry
+from rojnik.agent.agent import Agent, AgentRegistry
+from rojnik.tools.builtins.delegate import current_session_id, make_delegate_tool
+from rojnik.tools.registry import ToolRegistry
 from tests.conftest import MockLLMClient, stop_response, tool_call_response
 
 
@@ -147,10 +147,10 @@ class TestDelegateExecution:
 class TestOrchestratorLoop:
     async def test_orchestrator_calls_subagent_and_gets_result(self, store):
         """Full loop with a delegate call: orchestrator → subagent → answer."""
-        from agent_harness.agent.loop import run_loop
-        from agent_harness.agent.state import RunState
-        from agent_harness.llm.schemas import SystemMessage
-        from agent_harness.memory.context import ContextBuilder
+        from rojnik.agent.loop import run_loop
+        from rojnik.agent.state import RunState
+        from rojnik.llm.schemas import SystemMessage
+        from rojnik.memory.context import ContextBuilder
 
         # The subagent always returns a fixed answer
         subagent_llm = MockLLMClient([stop_response("I found 42 files.")])

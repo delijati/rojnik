@@ -1,5 +1,5 @@
 """
-Interactive coding chat — Textual TUI backed by the agent harness.
+Interactive coding chat — Textual TUI backed by the rojnik.
 
 Architecture
 ------------
@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Callable
 
 # ---------------------------------------------------------------------------
-# CLI args — must be parsed BEFORE importing agent_harness so env vars are set
+# CLI args — must be parsed BEFORE importing rojnik so env vars are set
 # ---------------------------------------------------------------------------
 
 import argparse
@@ -50,7 +50,7 @@ import argparse
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Interactive coding chat backed by the agent harness.",
+        description="Interactive coding chat backed by the rojnik.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -86,7 +86,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _apply_args_to_env(args: argparse.Namespace) -> None:
-    """Push CLI overrides into os.environ before agent_harness is imported."""
+    """Push CLI overrides into os.environ before rojnik is imported."""
     if args.provider:
         os.environ["AGENT_PROVIDER"] = args.provider
     if args.model:
@@ -118,18 +118,18 @@ _args = _parse_args()
 _apply_args_to_env(_args)
 
 # ---------------------------------------------------------------------------
-# agent_harness imports (after env setup)
+# rojnik imports (after env setup)
 # ---------------------------------------------------------------------------
 
 sys.path.insert(0, "/work")
 
-import agent_harness  # noqa: F401  — triggers logging setup  # noqa: E402
+import rojnik  # noqa: F401  — triggers logging setup  # noqa: E402
 
-from agent_harness.agent.agent import Agent, AgentRegistry  # noqa: E402
-from agent_harness.llm.client import LLMClient  # noqa: E402
-from agent_harness.tools.builtins.delegate import make_delegate_tool  # noqa: E402
-from agent_harness.tools.builtins.files import list_directory, read_file  # noqa: E402
-from agent_harness.tools.builtins.shell import shell_exec  # noqa: E402
+from rojnik.agent.agent import Agent, AgentRegistry  # noqa: E402
+from rojnik.llm.client import LLMClient  # noqa: E402
+from rojnik.tools.builtins.delegate import make_delegate_tool  # noqa: E402
+from rojnik.tools.builtins.files import list_directory, read_file  # noqa: E402
+from rojnik.tools.builtins.shell import shell_exec  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Textual / Rich imports
@@ -336,7 +336,7 @@ class ChatApp(App):
     @work
     async def _setup_agent(self) -> None:
         """Initialise the DB and build the agent graph in a background worker."""
-        from agent_harness.memory.store import MemoryStore
+        from rojnik.memory.store import MemoryStore
 
         await MemoryStore.get()
         llm = LLMClient()

@@ -3,12 +3,12 @@
 
 import pytest
 
-from agent_harness.agent.loop import MaxIterationsError, run_loop
-from agent_harness.agent.state import RunState
-from agent_harness.llm.schemas import ToolCallPart
-from agent_harness.memory.context import ContextBuilder
-from agent_harness.tools.base import tool
-from agent_harness.tools.registry import ToolRegistry
+from rojnik.agent.loop import MaxIterationsError, run_loop
+from rojnik.agent.state import RunState
+from rojnik.llm.schemas import ToolCallPart
+from rojnik.memory.context import ContextBuilder
+from rojnik.tools.base import tool
+from rojnik.tools.registry import ToolRegistry
 from tests.conftest import MockLLMClient, stop_response, tool_call_response
 
 
@@ -18,7 +18,7 @@ from tests.conftest import MockLLMClient, stop_response, tool_call_response
 
 async def _make_state(store, agent_name="test_agent"):
     sid = await store.create_session(agent_name, task="test task")
-    from agent_harness.llm.schemas import SystemMessage
+    from rojnik.llm.schemas import SystemMessage
     await store.add_message(sid, SystemMessage(content="You are a test agent."))
     return RunState(session_id=sid, agent_name=agent_name)
 
@@ -183,7 +183,7 @@ class TestLoopWithTools:
 
         # Verify the error was persisted in tool_results
         from sqlalchemy import select
-        from agent_harness.memory.models import ToolResult
+        from rojnik.memory.models import ToolResult
         async with store._session_factory() as db:
             res = await db.execute(
                 select(ToolResult).where(ToolResult.session_id == state.session_id)
@@ -265,7 +265,7 @@ class TestMaxIterations:
 
 class TestUnexpectedFinish:
     async def test_length_finish_reason_raises(self, store):
-        from agent_harness.llm.schemas import LLMResponse
+        from rojnik.llm.schemas import LLMResponse
         llm = MockLLMClient([
             LLMResponse(finish_reason="length", content="truncated text", model="mock")
         ])

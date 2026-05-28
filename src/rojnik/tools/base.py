@@ -3,7 +3,7 @@
 
 Usage
 -----
-    from agent_harness.tools.base import tool
+    from rojnik.tools.base import tool
 
     @tool(description="Return the square of a number")
     async def square(n: float) -> float:
@@ -41,7 +41,7 @@ _is_coroutine = inspect.iscoroutinefunction
 from pydantic import create_model
 from pydantic.fields import FieldInfo
 
-from agent_harness.llm.schemas import (
+from rojnik.llm.schemas import (
     ToolFunctionSchema,
     ToolParameterSchema,
     ToolSchema,

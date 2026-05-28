@@ -3,8 +3,8 @@
 
 import pytest
 
-from agent_harness.llm.schemas import AssistantMessage, SystemMessage, UserMessage
-from agent_harness.memory.context import ContextBuilder
+from rojnik.llm.schemas import AssistantMessage, SystemMessage, UserMessage
+from rojnik.memory.context import ContextBuilder
 
 
 class TestContextBuilder:

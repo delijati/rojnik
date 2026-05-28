@@ -1,5 +1,5 @@
 """
-Shared fixtures for the agent_harness test suite.
+Shared fixtures for the rojnik test suite.
 
 Key concerns
 ------------
@@ -16,10 +16,10 @@ import pytest
 
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-dummy")
 
-import agent_harness  # noqa: F401  — triggers logging setup
+import rojnik  # noqa: F401  — triggers logging setup
 
-from agent_harness.llm.schemas import LLMResponse, ToolCallPart
-from agent_harness.memory.store import MemoryStore
+from rojnik.llm.schemas import LLMResponse, ToolCallPart
+from rojnik.memory.store import MemoryStore
 
 
 # ---------------------------------------------------------------------------
@@ -29,7 +29,7 @@ from agent_harness.memory.store import MemoryStore
 @pytest.fixture(autouse=True)
 def reset_singletons():
     """Wipe module-level singletons so every test starts clean."""
-    import agent_harness.agent.agent as agent_module
+    import rojnik.agent.agent as agent_module
 
     MemoryStore._instance = None
     agent_module._llm_instance = None

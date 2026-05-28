@@ -6,7 +6,7 @@ Two sinks:
   - File:    newline-delimited JSON, DEBUG and above. Rotates at 50 MB.
 
 Call setup_logging() once at process start (done automatically on first import
-of agent_harness).  All other modules just do:
+of rojnik).  All other modules just do:
 
     from loguru import logger
     logger.info("...", key=value)

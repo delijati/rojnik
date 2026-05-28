@@ -1,7 +1,7 @@
 """
 tests/test_mcp.py — integration tests for mcp_server.py and the MCP bridge.
 
-The bridge (mcp_to_tools and friends) lives in agent_harness.mcp and is
+The bridge (mcp_to_tools and friends) lives in rojnik.mcp and is
 imported directly; no code is inlined here.
 
 Covers:
@@ -27,9 +27,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mcp import ClientSession  # noqa: E402
-from mcp.client.stdio import StdioServerParameters, stdio_client  # noqa: E402
+from mcp.client.stdio import StdioServerParameters, get_default_environment, stdio_client  # noqa: E402
 
-from agent_harness.mcp import mcp_to_tools  # noqa: E402
+from rojnik.mcp import mcp_to_tools  # noqa: E402
 
 _SERVER = str(Path(__file__).parent.parent / "examples" / "mcp_server.py")
 
@@ -41,7 +41,13 @@ _SERVER = str(Path(__file__).parent.parent / "examples" / "mcp_server.py")
 
 @asynccontextmanager
 async def _connect():
-    params = StdioServerParameters(command=sys.executable, args=[_SERVER])
+    # stdio_client only inherits a safe env-var whitelist; PYTHONPATH is not
+    # included.  Propagate it explicitly so the server subprocess can import
+    # packages installed in a virtual-environment that is on PYTHONPATH.
+    env = get_default_environment()
+    if "PYTHONPATH" in os.environ:
+        env["PYTHONPATH"] = os.environ["PYTHONPATH"]
+    params = StdioServerParameters(command=sys.executable, args=[_SERVER], env=env)
     errlog = open(os.devnull, "w")
     try:
         async with stdio_client(params, errlog=errlog) as (r, w):
