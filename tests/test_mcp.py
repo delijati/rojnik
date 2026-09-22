@@ -52,14 +52,10 @@ async def _connect():
     if "PYTHONPATH" in os.environ:
         env["PYTHONPATH"] = os.environ["PYTHONPATH"]
     params = StdioServerParameters(command=sys.executable, args=[_SERVER], env=env)
-    errlog = open(os.devnull, "w")
-    try:
-        async with stdio_client(params, errlog=errlog) as (r, w):
-            async with ClientSession(r, w) as session:
-                await session.initialize()
-                yield session
-    finally:
-        errlog.close()
+    async with stdio_client(params, errlog=sys.stderr) as (r, w):
+        async with ClientSession(r, w) as session:
+            await session.initialize()
+            yield session
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +74,7 @@ async def test_get_time_schema_has_empty_properties():
     async with _connect() as session:
         result = await session.list_tools()
         tool = next(t for t in result.tools if t.name == "get_time")
-        schema = tool.inputSchema if isinstance(tool.inputSchema, dict) else {}
+        schema = tool.input_schema if isinstance(tool.input_schema, dict) else {}
         assert schema.get("type") == "object"
         assert schema.get("properties") == {}
 
@@ -88,7 +84,7 @@ async def test_roll_dice_schema_has_sides_and_count():
     async with _connect() as session:
         result = await session.list_tools()
         tool = next(t for t in result.tools if t.name == "roll_dice")
-        schema = tool.inputSchema if isinstance(tool.inputSchema, dict) else {}
+        schema = tool.input_schema if isinstance(tool.input_schema, dict) else {}
         assert "sides" in schema.get("properties", {})
         assert "count" in schema.get("properties", {})
         assert schema.get("required") == ["sides"]
@@ -105,7 +101,7 @@ _ISO_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$")
 async def test_get_time_returns_iso8601():
     async with _connect() as session:
         result = await session.call_tool("get_time", {})
-        assert not result.isError
+        assert not result.is_error
         text = result.content[0].text
         assert _ISO_RE.match(text), f"Not ISO 8601: {text!r}"
 
@@ -125,7 +121,7 @@ async def test_get_time_contains_utc_offset():
 async def test_roll_dice_single_die():
     async with _connect() as session:
         result = await session.call_tool("roll_dice", {"sides": 6})
-        assert not result.isError
+        assert not result.is_error
         text = result.content[0].text
         assert "1d6" in text and "total" in text
 
@@ -134,7 +130,7 @@ async def test_roll_dice_single_die():
 async def test_roll_dice_multiple():
     async with _connect() as session:
         result = await session.call_tool("roll_dice", {"sides": 20, "count": 4})
-        assert not result.isError
+        assert not result.is_error
         text = result.content[0].text
         assert "4d20" in text
         rolls = [int(x.strip()) for x in re.search(r"\[(.+?)\]", text).group(1).split(",")]
@@ -159,19 +155,19 @@ async def test_roll_dice_total_is_sum():
 @pytest.mark.asyncio
 async def test_roll_dice_sides_below_2_is_error():
     async with _connect() as session:
-        assert (await session.call_tool("roll_dice", {"sides": 1})).isError
+        assert (await session.call_tool("roll_dice", {"sides": 1})).is_error
 
 
 @pytest.mark.asyncio
 async def test_roll_dice_count_zero_is_error():
     async with _connect() as session:
-        assert (await session.call_tool("roll_dice", {"sides": 6, "count": 0})).isError
+        assert (await session.call_tool("roll_dice", {"sides": 6, "count": 0})).is_error
 
 
 @pytest.mark.asyncio
 async def test_roll_dice_count_over_100_is_error():
     async with _connect() as session:
-        assert (await session.call_tool("roll_dice", {"sides": 6, "count": 101})).isError
+        assert (await session.call_tool("roll_dice", {"sides": 6, "count": 101})).is_error
 
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ Each callable returned by ``mcp_to_tools`` is branded with:
 
 Dependency
 ----------
-Requires the ``mcp`` package (``pip install mcp``).  The module raises a clear
+Requires the ``mcp`` 2.x package (``pip install 'mcp>=2.2,<3'``). The module raises a clear
 ``ImportError`` at import time if it is not installed so that the rest of the
 harness can be used without it.
 """
@@ -32,7 +32,7 @@ try:
 except ImportError as _err:
     raise ImportError(
         "rojnik.mcp requires the 'mcp' package.  "
-        "Install it with:  pip install mcp\n"
+        "Install it with:  pip install 'mcp>=2.2,<3'\n"
         "Or:  pip install 'rojnik[mcp]'"
     ) from _err
 
@@ -44,7 +44,7 @@ from rojnik.llm.schemas import ToolFunctionSchema, ToolParameterSchema, ToolSche
 
 def _mcp_tool_to_schema(t: mcp_types.Tool) -> ToolSchema:
     """Convert an MCP ``Tool`` descriptor into a harness ``ToolSchema``."""
-    raw: dict[str, Any] = t.inputSchema if isinstance(t.inputSchema, dict) else {}
+    raw: dict[str, Any] = t.input_schema if isinstance(t.input_schema, dict) else {}
     return ToolSchema(
         type="function",
         function=ToolFunctionSchema(
@@ -69,7 +69,7 @@ def _make_mcp_caller(session: ClientSession, tool_name: str) -> Callable:
     """
     async def _call(**kwargs: Any) -> str:
         result = await session.call_tool(tool_name, kwargs or None)
-        if result.isError:
+        if result.is_error:
             parts = [
                 b.text
                 for b in result.content

@@ -46,7 +46,7 @@ dev = [
 # Only install what you actually use.
 deepseek  = []          # DeepSeek uses the openai SDK — no extra install needed
 local     = []          # OpenAI-compatible local servers need no extra SDK
-mcp       = ["mcp>=1.0"]
+mcp       = ["mcp>=2.2,<3"]
 
 [project.urls]
 Repository = "https://github.com/delijati/rojnik"
