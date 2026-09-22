@@ -5,12 +5,10 @@ import pytest
 
 from rojnik.agent.loop import MaxIterationsError, run_loop
 from rojnik.agent.state import RunState
-from rojnik.llm.schemas import ToolCallPart
 from rojnik.memory.context import ContextBuilder
 from rojnik.tools.base import tool
 from rojnik.tools.registry import ToolRegistry
 from tests.conftest import MockLLMClient, stop_response, tool_call_response
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -183,6 +181,7 @@ class TestLoopWithTools:
 
         # Verify the error was persisted in tool_results
         from sqlalchemy import select
+
         from rojnik.memory.models import ToolResult
         async with store._session_factory() as db:
             res = await db.execute(

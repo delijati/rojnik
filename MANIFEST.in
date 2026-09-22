@@ -1,0 +1,7 @@
+include AGENTS.md
+include LICENSE
+include README.md
+include logo.png
+recursive-include examples *.md *.py *.sh
+recursive-include examples SKILL.md
+recursive-include tests *.py

@@ -2,12 +2,12 @@
 
 
 import json
+
 import pytest
 
 from rojnik.llm.schemas import ToolCallPart
 from rojnik.tools.base import tool
 from rojnik.tools.registry import ToolNotFoundError, ToolRegistry
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

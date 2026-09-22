@@ -13,8 +13,7 @@ from pydantic import BaseModel, Field
 
 from rojnik.llm.schemas import Message
 
-
-RunStatus = Literal["running", "completed", "error", "max_iterations"]
+RunStatus = Literal["running", "completed", "error", "cancelled", "max_iterations"]
 
 
 class RunState(BaseModel):

@@ -18,12 +18,17 @@ Usage
 """
 
 
+import tiktoken
 from loguru import logger
 
-import tiktoken
-
 from rojnik.config import settings
-from rojnik.llm.schemas import Message, SystemMessage
+from rojnik.llm.schemas import (
+    AssistantMessage,
+    Message,
+    SystemMessage,
+    ToolResultMessage,
+    UserMessage,
+)
 from rojnik.memory.store import MemoryStore
 
 
@@ -46,6 +51,10 @@ def _message_token_count(msg: Message, encoder: tiktoken.Encoding) -> int:
         for tc in msg.tool_calls:
             content += tc.name + tc.arguments
     return overhead + _count_tokens(content, encoder)
+
+
+class ContextBudgetError(ValueError):
+    """Raised when mandatory system and user messages exceed the token budget."""
 
 
 class ContextBuilder:
@@ -102,31 +111,75 @@ class ContextBuilder:
             else:
                 non_system.append(msg)
 
+        # Tool calls and their results must stay together; providers reject
+        # orphaned tool results or assistant calls with missing responses.
+        groups: list[list[Message]] = []
+        index = 0
+        while index < len(non_system):
+            msg = non_system[index]
+            group = [msg]
+            index += 1
+            if isinstance(msg, AssistantMessage) and msg.tool_calls:
+                call_ids = {call.id for call in msg.tool_calls}
+                while index < len(non_system):
+                    result = non_system[index]
+                    if not isinstance(result, ToolResultMessage):
+                        break
+                    if result.tool_call_id not in call_ids:
+                        break
+                    group.append(result)
+                    index += 1
+            groups.append(group)
+
+        latest_user_group: int | None = None
+        for group_index in range(len(groups) - 1, -1, -1):
+            if any(isinstance(msg, UserMessage) for msg in groups[group_index]):
+                latest_user_group = group_index
+                break
+
         system_tokens = sum(_message_token_count(m, self._encoder) for m in system_msgs)
+        mandatory_tokens = system_tokens
+        if latest_user_group is not None:
+            mandatory_tokens += sum(
+                _message_token_count(msg, self._encoder) for msg in groups[latest_user_group]
+            )
+        if mandatory_tokens > self._budget:
+            raise ContextBudgetError(
+                "System instructions and the latest user message require "
+                f"{mandatory_tokens} tokens, exceeding the {self._budget}-token context budget."
+            )
         remaining_budget = self._budget - system_tokens
 
-        # Greedily include messages newest-first, then reverse.
-        kept: list[Message] = []
+        # Greedily include complete groups newest-first, then reverse.
+        kept_group_indexes: set[int] = set()
         tokens_used = 0
+        if latest_user_group is not None:
+            kept_group_indexes.add(latest_user_group)
+            tokens_used = sum(
+                _message_token_count(msg, self._encoder) for msg in groups[latest_user_group]
+            )
         trimmed = 0
 
-        for msg in reversed(non_system):
-            cost = _message_token_count(msg, self._encoder)
+        for group_index in range(len(groups) - 1, -1, -1):
+            if group_index == latest_user_group:
+                continue
+            group = groups[group_index]
+            cost = sum(_message_token_count(msg, self._encoder) for msg in group)
             if tokens_used + cost <= remaining_budget:
-                kept.append(msg)
+                kept_group_indexes.add(group_index)
                 tokens_used += cost
             else:
-                trimmed += 1
+                trimmed += len(group)
 
         if trimmed:
             logger.debug(
                 "context.trimmed",
                 session_id=session_id,
                 trimmed_messages=trimmed,
-                kept_messages=len(kept),
+                kept_messages=sum(len(groups[index]) for index in kept_group_indexes),
                 token_budget=self._budget,
                 tokens_used=system_tokens + tokens_used,
             )
 
-        kept.reverse()  # back to chronological order
+        kept = [msg for index, group in enumerate(groups) if index in kept_group_indexes for msg in group]
         return system_msgs + kept

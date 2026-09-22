@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-mcp_server.py — minimal MCP stdio server used by mcp_agent.py.
+mcp_server.py — minimal MCP stdio server used by coding_agent.py.
 
 Exposes two tools over the Model Context Protocol (stdio transport):
 
@@ -9,7 +9,7 @@ Exposes two tools over the Model Context Protocol (stdio transport):
 
 Run standalone (for manual testing with the MCP Inspector or any client):
 
-    /work/venv/bin/python examples/mcp_server.py
+    python examples/mcp_server.py
 
 The server communicates exclusively over stdin/stdout (MCP stdio transport).
 All diagnostic output goes to stderr so it does not pollute the JSON-RPC stream.
@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import random
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from mcp import types
 from mcp.server import Server
@@ -79,7 +79,7 @@ async def list_tools() -> list[types.Tool]:
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     if name == "get_time":
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
         return [types.TextContent(type="text", text=now)]
 
     if name == "roll_dice":

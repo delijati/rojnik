@@ -16,7 +16,8 @@ Usage
 
 
 import json
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from loguru import logger
 
@@ -46,9 +47,10 @@ class ToolRegistry:
         with @tool (i.e. it must have `.is_tool == True` and `.tool_schema`).
         """
         if not getattr(fn, "is_tool", False):
+            name = getattr(fn, "__name__", type(fn).__name__)
             raise TypeError(
-                f"{fn.__name__!r} is not a @tool-decorated function. "
-                "Decorate it with @tool(description='...') first."
+                f"{name!r} is not a @tool-decorated function. "
+                "Decorate it with @tool(description='...') or pass agent.as_tool()."
             )
         schema: ToolSchema = fn.tool_schema  # type: ignore[attr-defined]
         name = schema.function.name

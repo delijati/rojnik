@@ -36,7 +36,8 @@ except ImportError as _err:
         "Or:  pip install 'rojnik[mcp]'"
     ) from _err
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from rojnik.llm.schemas import ToolFunctionSchema, ToolParameterSchema, ToolSchema
 

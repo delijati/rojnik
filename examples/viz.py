@@ -20,8 +20,8 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,6 @@ from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.widgets import Footer, Header, Label, ListItem, ListView, Static, Tree
 from textual.widgets.tree import TreeNode
-
 
 # ---------------------------------------------------------------------------
 # Data layer — plain sqlite3, no SQLAlchemy needed
@@ -200,7 +199,7 @@ def _session_list_text(s: SessionRow) -> str:
         else:
             parts.append(f"  [dim green]Result:[/] [dim]{short}[/]")
     elif s.status in _ERROR_STATUSES:
-        parts.append(f"  [bold red]Error:[/] [dim red](no detail stored)[/]")
+        parts.append("  [bold red]Error:[/] [dim red](no detail stored)[/]")
 
     if s.status == "running" and not s.finished_at:
         parts.append("  [yellow dim](abandoned — never closed)[/]")

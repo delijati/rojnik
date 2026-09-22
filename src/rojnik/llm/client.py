@@ -23,10 +23,11 @@ caller can create a fully custom client without touching env vars.
 
 import asyncio
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from loguru import logger
-from openai import AsyncOpenAI, APIConnectionError, APIStatusError, RateLimitError
+from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitError
 
 from rojnik.config import settings
 from rojnik.llm.schemas import (

@@ -1,167 +1,110 @@
-# examples
+# Examples
 
-## Prerequisites
+## Setup
 
 ```bash
-python -m venv venv && source venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
----
-
-## coding_agent.py
-
-Multi-agent coding assistant.  Architecture:
-
-```
-orchestrator
-  ├── file_reader     (read_file, list_directory)
-  ├── shell_executor  (shell_exec)
-  └── mcp_agent       (any MCP server tools — only when --mcp-server is given)
-```
-
-### OpenAI
+Add MCP support when running the MCP example:
 
 ```bash
-OPENAI_API_KEY=sk-... python examples/coding_agent.py
+pip install -e ".[mcp]"
 ```
 
-Custom task:
+## Coding Agent
+
+`coding_agent.py` builds an orchestrator with `file_reader` and `shell_executor` exposed as direct function tools through `Agent.as_tool()`.
 
 ```bash
 OPENAI_API_KEY=sk-... python examples/coding_agent.py \
-    "Read pyproject.toml and tell me the project version"
+    "Read pyproject.toml and report the project version"
 ```
 
-### DeepSeek
+DeepSeek:
 
 ```bash
 python examples/coding_agent.py \
     --provider deepseek \
-    --api-key sk-...
+    --api-key sk-... \
+    "Inspect this repository"
 ```
 
-Uses `deepseek-chat` by default. For the reasoning model:
-
-```bash
-python examples/coding_agent.py \
-    --provider deepseek \
-    --model deepseek-reasoner \
-    --api-key sk-...
-```
-
-### Local — llama.cpp
-
-Start the llama.cpp server with a model that supports tool calling:
-
-```bash
-llama-server \
-    --model ~/.cache/llama/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf \
-    --port 8080
-```
-
-Then run the agent:
+Local OpenAI-compatible server:
 
 ```bash
 python examples/coding_agent.py \
     --provider local \
     --base-url http://localhost:8080/v1 \
-    --model qwen2.5-coder
+    --model qwen2.5-coder \
+    "Inspect this repository"
 ```
 
-### With an MCP server
+### Skills
 
-Pass `--mcp-server COMMAND [ARGS...]` to spawn any MCP-compatible server and
-bridge its tools into the harness as a dedicated `mcp_agent` specialist.
-
-`mcp_server.py` is a bundled demo server that exposes `get_time` and
-`roll_dice`:
+Load the bundled code-review skill eagerly into the file specialist's system
+prompt:
 
 ```bash
 OPENAI_API_KEY=sk-... python examples/coding_agent.py \
-    --mcp-server python examples/mcp_server.py \
-    "What time is it? Also roll 3d6 for me."
+    --skill examples/skills/code-review \
+    --skill-mode eager \
+    "Review this repository"
 ```
 
-Any compliant MCP server works the same way:
+Use on-demand mode to advertise the skill catalog and load complete
+instructions only when selected:
 
 ```bash
 OPENAI_API_KEY=sk-... python examples/coding_agent.py \
-    --mcp-server /usr/local/bin/my-mcp-server --arg1 val1 \
-    "Use the server tools to answer my question"
+    --skill examples/skills/code-review/SKILL.md \
+    --skill-mode on_demand \
+    "Review this repository"
 ```
 
-The `mcp` package must be installed (`pip install mcp`; included in
-`pip install -e ".[dev]"`).
+Repeat `--skill PATH` to configure multiple skills. Paths are explicit; the
+examples do not scan the project or home directory automatically.
 
----
+### Optional MCP Specialist
 
-## mcp_server.py
+The `--mcp-server` value is one quoted command parsed with shell-like quoting. The bundled server exposes `get_time` and `roll_dice`:
 
-Standalone demo MCP server (stdio transport).  Exposes two tools:
+```bash
+OPENAI_API_KEY=sk-... python examples/coding_agent.py \
+    --mcp-server "python examples/mcp_server.py" \
+    "What time is it? Also roll 3d6."
+```
 
-| Tool | Description |
-|------|-------------|
-| `get_time()` | Returns the current UTC time in ISO 8601 format |
-| `roll_dice(sides, count)` | Simulates rolling dice and returns individual rolls and total |
+Another stdio MCP server works the same way:
 
-Intended to be used with `coding_agent.py --mcp-server`, but it can connect
-to any MCP client (e.g. the [MCP Inspector](https://github.com/modelcontextprotocol/inspector)):
+```bash
+python examples/coding_agent.py \
+    --mcp-server "/usr/local/bin/my-mcp-server --arg1 value1" \
+    "Use the MCP tools to answer my question"
+```
+
+## Interactive Chat
+
+```bash
+OPENAI_API_KEY=sk-... python examples/chat.py
+```
+
+The Textual interface streams responses, displays tool activity, and stores history in `chat.db`. Inspect that history with:
+
+```bash
+python examples/viz.py --db chat.db
+```
+
+## Bubblewrap
+
+The `run_chat_bwrap.sh` and `run_coding_agent_bwrap.sh` scripts are Linux-only examples for isolating filesystem and shell tools. They mount the current repository at `/work` inside the sandbox and currently expect a virtual environment named `venv` in the repository root.
+
+## MCP Server
+
+Run the bundled stdio server directly for use with an MCP client or inspector:
 
 ```bash
 python examples/mcp_server.py
 ```
-
----
-
-## run_coding_agent_bwrap.sh
-
-Runs `coding_agent.py` inside a bubblewrap sandbox. Same flags as above,
-including `--mcp-server` (the subprocess is spawned inside the sandbox).
-
-```bash
-chmod +x examples/run_coding_agent_bwrap.sh
-
-# DeepSeek
-./examples/run_coding_agent_bwrap.sh \
-    --provider deepseek \
-    --api-key sk-...
-
-# llama.cpp (server must be running on the host)
-./examples/run_coding_agent_bwrap.sh \
-    --provider local \
-    --base-url http://localhost:8080/v1 \
-    --model qwen2.5-coder
-
-# With the demo MCP server
-OPENAI_API_KEY=sk-... ./examples/run_coding_agent_bwrap.sh \
-    --mcp-server python examples/mcp_server.py \
-    "What time is it?"
-```
-
-The current directory is bind-mounted read-write at `/work` inside the sandbox.
-
----
-
-## viz.py
-
-Terminal call-tree visualiser for SQLite run databases produced by agent runs.
-
-Requires `textual>=8.0` (included in `pip install -e ".[dev]"`).
-
-```bash
-# view ./agent.db (default)
-python3 examples/viz.py
-
-# view a specific database
-python3 examples/viz.py --db /path/to/agent.db
-```
-
-Keys:
-
-| Key | Action |
-|-----|--------|
-| `↑` / `↓` | Navigate sessions / tree nodes |
-| `enter` | Expand / collapse tree node |
-| `r` | Refresh from database |
-| `q` | Quit |

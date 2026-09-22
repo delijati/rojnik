@@ -30,7 +30,10 @@ Usage
     result = await file_agent.run("Summarise /etc/hosts")
 """
 
-from typing import Callable, Any
+import asyncio
+import re
+from collections.abc import Callable, Sequence
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -40,7 +43,19 @@ from rojnik.llm.client import LLMClient
 from rojnik.llm.schemas import ResponseFormat, SystemMessage
 from rojnik.memory.context import ContextBuilder
 from rojnik.memory.store import MemoryStore
+from rojnik.skills import (
+    DEFAULT_MAX_SKILL_BYTES,
+    DEFAULT_MAX_SKILLS,
+    DEFAULT_MAX_TOTAL_SKILL_BYTES,
+    SkillSource,
+    compose_skill_prompt,
+    load_skills,
+    make_load_skill_tool,
+)
+from rojnik.tools.base import tool
 from rojnik.tools.registry import ToolRegistry
+
+_TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class Agent:
@@ -64,6 +79,12 @@ class Agent:
         ``(tool_name, arguments_json)``.  Stored on the instance so it
         fires for sub-agents too (sub-agents are called via
         ``delegate_to_agent`` without extra kwargs).
+    skills:
+        Explicit ``SKILL.md`` paths, directories containing ``SKILL.md``, or
+        preloaded Skill objects. Skills are validated at construction time.
+    skill_mode:
+        ``"eager"`` includes full instructions in the system prompt.
+        ``"on_demand"`` advertises the catalog and adds ``load_skill``.
     """
 
     def __init__(
@@ -74,16 +95,36 @@ class Agent:
         llm: LLMClient | None = None,
         max_iterations: int | None = None,
         on_tool_call: Callable[[str, str], None] | None = None,
+        skills: Sequence[SkillSource] | None = None,
+        skill_mode: Literal["eager", "on_demand"] = "eager",
+        max_skill_bytes: int = DEFAULT_MAX_SKILL_BYTES,
+        max_total_skill_bytes: int = DEFAULT_MAX_TOTAL_SKILL_BYTES,
+        max_skills: int = DEFAULT_MAX_SKILLS,
     ) -> None:
+        if skill_mode not in ("eager", "on_demand"):
+            raise ValueError("skill_mode must be 'eager' or 'on_demand'")
         self.name = name
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
         self._on_tool_call = on_tool_call
+        self.skills = load_skills(
+            skills or (),
+            max_skill_bytes=max_skill_bytes,
+            max_total_skill_bytes=max_total_skill_bytes,
+            max_skills=max_skills,
+        )
+        self.skill_mode = skill_mode
 
         # Tool registry — populated from the tools list
         self.tool_registry = ToolRegistry()
         for fn in tools or []:
             self.tool_registry.register(fn)
+        if self.skills and skill_mode == "on_demand":
+            if "load_skill" in self.tool_registry:
+                raise ValueError(
+                    "Tool name 'load_skill' is reserved when skill_mode='on_demand'."
+                )
+            self.tool_registry.register(make_load_skill_tool(self.skills))
 
         # LLM client — shared singleton by default
         self._llm = llm or _shared_llm()
@@ -140,32 +181,56 @@ class Agent:
             parent_session_id=parent_session_id,
         )
 
-        # Persist the system message
-        system_msg = SystemMessage(content=self.system_prompt)
-        await store.add_message(session_id, system_msg)
-
         state = RunState(session_id=session_id, agent_name=self.name)
 
-        logger.info(
-            "agent.run.start",
-            agent=self.name,
-            session_id=session_id,
-            parent_session_id=parent_session_id,
-            task_preview=task[:120],
-        )
+        try:
+            effective_prompt = compose_skill_prompt(
+                self.system_prompt,
+                self.skills,
+                eager=self.skill_mode == "eager",
+            )
+            await store.add_message(session_id, SystemMessage(content=effective_prompt))
 
-        result = await run_loop(
-            state=state,
-            task=task,
-            llm=self._llm,
-            tool_registry=self.tool_registry,
-            store=store,
-            context_builder=self._context_builder,
-            max_iterations=self.max_iterations,
-            on_chunk=on_chunk,
-            on_tool_call=self._on_tool_call,
-            response_format=response_format,
-        )
+            logger.info(
+                "agent.run.start",
+                agent=self.name,
+                session_id=session_id,
+                parent_session_id=parent_session_id,
+                task_preview=task[:120],
+            )
+
+            result = await run_loop(
+                state=state,
+                task=task,
+                llm=self._llm,
+                tool_registry=self.tool_registry,
+                store=store,
+                context_builder=self._context_builder,
+                max_iterations=self.max_iterations,
+                on_chunk=on_chunk,
+                on_tool_call=self._on_tool_call,
+                response_format=response_format,
+            )
+        except asyncio.CancelledError:
+            state.status = "cancelled"
+            await store.close_session(
+                session_id,
+                status="cancelled",
+                result="Agent run cancelled",
+                total_tokens=state.total_tokens,
+            )
+            raise
+        except Exception as exc:
+            if state.status == "running":
+                state.status = "error"
+                state.error = str(exc)
+                await store.close_session(
+                    session_id,
+                    status="error",
+                    result=f"{type(exc).__name__}: {exc}",
+                    total_tokens=state.total_tokens,
+                )
+            raise
 
         logger.info(
             "agent.run.done",
@@ -175,10 +240,38 @@ class Agent:
         )
         return result
 
+    def as_tool(
+        self,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> Callable[..., Any]:
+        """Expose this agent as an LLM function tool accepting a ``task`` string."""
+        tool_name = name or self.name
+        if not _TOOL_NAME_PATTERN.fullmatch(tool_name):
+            raise ValueError(
+                "Agent tool names may contain only letters, numbers, underscores, and hyphens."
+            )
+
+        async def run_agent(task: str) -> str:
+            from rojnik.tools.builtins.delegate import current_session_id
+
+            return await self.run(
+                task,
+                parent_session_id=current_session_id.get(),
+            )
+
+        run_agent.__name__ = tool_name
+        return tool(
+            description=description
+            or f"Delegate a task to the {self.name} agent and return its complete response."
+        )(run_agent)
+
     def __repr__(self) -> str:
         return (
             f"Agent(name={self.name!r}, "
-            f"tools={self.tool_registry.names()})"
+            f"tools={self.tool_registry.names()}, "
+            f"skills={[skill.name for skill in self.skills]!r})"
         )
 
 

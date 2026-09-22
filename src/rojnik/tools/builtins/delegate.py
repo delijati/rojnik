@@ -42,8 +42,9 @@ the correct parent_session_id.
 """
 
 
+from collections.abc import Callable
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Callable, Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 

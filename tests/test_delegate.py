@@ -8,7 +8,6 @@ from rojnik.tools.builtins.delegate import current_session_id, make_delegate_too
 from rojnik.tools.registry import ToolRegistry
 from tests.conftest import MockLLMClient, stop_response, tool_call_response
 
-
 # ---------------------------------------------------------------------------
 # AgentRegistry
 # ---------------------------------------------------------------------------
@@ -76,6 +75,51 @@ class TestMakeDelegateTool:
         reg.register(Agent(name="coder", system_prompt="x", llm=MockLLMClient([])))
         delegate = make_delegate_tool(reg)
         assert "coder" in delegate.tool_schema.function.description
+
+
+class TestAgentAsTool:
+    def test_schema_uses_agent_name(self):
+        agent = Agent(name="file_reader", system_prompt="Read files", llm=MockLLMClient([]))
+        agent_tool = agent.as_tool()
+
+        assert agent_tool.tool_schema.function.name == "file_reader"
+        assert agent_tool.tool_schema.function.parameters.required == ["task"]
+
+    def test_custom_name_and_description(self):
+        agent = Agent(name="reader", system_prompt="Read files", llm=MockLLMClient([]))
+        agent_tool = agent.as_tool(name="inspect_files", description="Inspect project files")
+
+        assert agent_tool.tool_schema.function.name == "inspect_files"
+        assert agent_tool.tool_schema.function.description == "Inspect project files"
+
+    def test_invalid_name_raises(self):
+        agent = Agent(name="file reader", system_prompt="Read files", llm=MockLLMClient([]))
+
+        with pytest.raises(ValueError, match="tool names"):
+            agent.as_tool()
+
+    async def test_execution_preserves_parent_session(self, store):
+        received_parent: list[str | None] = []
+
+        class RecordingAgent(Agent):
+            async def run(self, task: str, parent_session_id=None, **kwargs) -> str:
+                received_parent.append(parent_session_id)
+                return f"result: {task}"
+
+        agent = RecordingAgent(
+            name="specialist",
+            system_prompt="Specialist",
+            llm=MockLLMClient([]),
+        )
+        agent_tool = agent.as_tool()
+        token = current_session_id.set("parent-session")
+        try:
+            result = await agent_tool(task="do work")
+        finally:
+            current_session_id.reset(token)
+
+        assert result == "result: do work"
+        assert received_parent == ["parent-session"]
 
 
 # ---------------------------------------------------------------------------
@@ -191,3 +235,36 @@ class TestOrchestratorLoop:
         assert "42" in result
         assert len(orchestrator_llm.calls) == 2
         assert len(subagent_llm.calls) == 1
+
+    async def test_orchestrator_calls_agent_as_tool(self, store):
+        subagent_llm = MockLLMClient([stop_response("Direct tool result")])
+        subagent = Agent(
+            name="specialist",
+            system_prompt="Do specialist work.",
+            llm=subagent_llm,
+        )
+        orchestrator_llm = MockLLMClient([
+            tool_call_response([("c1", "specialist", '{"task":"do work"}')]),
+            stop_response("Used the specialist result."),
+        ])
+        orchestrator = Agent(
+            name="orchestrator",
+            system_prompt="Call the specialist.",
+            tools=[subagent.as_tool()],
+            llm=orchestrator_llm,
+        )
+
+        result = await orchestrator.run("delegate this")
+
+        assert result == "Used the specialist result."
+        assert len(subagent_llm.calls) == 1
+
+        from sqlalchemy import select
+
+        from rojnik.memory.models import Session
+
+        async with store._session_factory() as db:
+            rows = (await db.execute(select(Session))).scalars().all()
+        parent = next(row for row in rows if row.agent_name == "orchestrator")
+        child = next(row for row in rows if row.agent_name == "specialist")
+        assert child.parent_session_id == parent.id

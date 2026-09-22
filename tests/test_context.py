@@ -1,10 +1,15 @@
 """Tests for memory/context.py — ContextBuilder token-budget trimming."""
 
-
 import pytest
 
-from rojnik.llm.schemas import AssistantMessage, SystemMessage, UserMessage
-from rojnik.memory.context import ContextBuilder
+from rojnik.llm.schemas import (
+    AssistantMessage,
+    SystemMessage,
+    ToolCallPart,
+    ToolResultMessage,
+    UserMessage,
+)
+from rojnik.memory.context import ContextBudgetError, ContextBuilder
 
 
 class TestContextBuilder:
@@ -31,10 +36,8 @@ class TestContextBuilder:
             await store.add_message(sid, UserMessage(content=f"message number {i} " * 20))
 
         builder = ContextBuilder(token_budget=50)  # very tight
-        window = await builder.build(sid, store)
-
-        assert len(window) >= 1
-        assert window[0].role == "system"
+        with pytest.raises(ContextBudgetError):
+            await builder.build(sid, store)
 
     async def test_oldest_messages_trimmed_first(self, store):
         """With a tight budget, newer messages should be kept over older ones."""
@@ -82,3 +85,48 @@ class TestContextBuilder:
             if hasattr(m, "content") and m.content
         )
         assert total <= budget + 50  # small slack for overhead estimation
+
+    async def test_tool_call_and_results_are_trimmed_as_one_group(self, store):
+        sid = await store.create_session("a")
+        call = ToolCallPart(id="call-1", name="large_tool", arguments="{}")
+        await store.add_message(sid, AssistantMessage(tool_calls=[call]))
+        await store.add_message(
+            sid,
+            ToolResultMessage(tool_call_id="call-1", content="large result " * 100),
+        )
+        await store.add_message(sid, UserMessage(content="new request"))
+
+        window = await ContextBuilder(token_budget=30).build(sid, store)
+
+        assert [message.role for message in window] == ["user"]
+
+    async def test_complete_tool_call_group_is_kept(self, store):
+        sid = await store.create_session("a")
+        calls = [
+            ToolCallPart(id="call-1", name="first", arguments="{}"),
+            ToolCallPart(id="call-2", name="second", arguments="{}"),
+        ]
+        await store.add_message(sid, AssistantMessage(tool_calls=calls))
+        await store.add_message(sid, ToolResultMessage(tool_call_id="call-1", content="one"))
+        await store.add_message(sid, ToolResultMessage(tool_call_id="call-2", content="two"))
+
+        window = await ContextBuilder(token_budget=1000).build(sid, store)
+
+        assert [message.role for message in window] == ["assistant", "tool", "tool"]
+
+    async def test_latest_user_message_is_mandatory(self, store):
+        sid = await store.create_session("a")
+        await store.add_message(sid, UserMessage(content="old " * 100))
+        await store.add_message(sid, UserMessage(content="latest"))
+
+        window = await ContextBuilder(token_budget=20).build(sid, store)
+
+        assert [message.content for message in window] == ["latest"]
+
+    async def test_oversized_system_and_latest_user_raise(self, store):
+        sid = await store.create_session("a")
+        await store.add_message(sid, SystemMessage(content="instructions " * 100))
+        await store.add_message(sid, UserMessage(content="current task"))
+
+        with pytest.raises(ContextBudgetError, match="latest user message"):
+            await ContextBuilder(token_budget=20).build(sid, store)

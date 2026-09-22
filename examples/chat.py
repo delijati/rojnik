@@ -34,17 +34,16 @@ Browse it afterwards with:
 
 from __future__ import annotations
 
-import asyncio
-import json
-import os
-from pathlib import Path
-from typing import Callable
-
 # ---------------------------------------------------------------------------
 # CLI args — must be parsed BEFORE importing rojnik so env vars are set
 # ---------------------------------------------------------------------------
-
 import argparse
+import asyncio
+import json
+import os
+from collections.abc import Callable
+from pathlib import Path
+from typing import Literal
 
 
 def _parse_args() -> argparse.Namespace:
@@ -80,6 +79,19 @@ def _parse_args() -> argparse.Namespace:
         "--db",
         default="chat.db",
         help="SQLite file for session history. Default: chat.db.",
+    )
+    parser.add_argument(
+        "--skill",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="SKILL.md file or containing directory. Repeat for multiple skills.",
+    )
+    parser.add_argument(
+        "--skill-mode",
+        choices=["eager", "on_demand"],
+        default="eager",
+        help="Include full skills in the prompt or load them with a tool. Default: eager.",
     )
     return parser.parse_args()
 
@@ -120,18 +132,9 @@ _apply_args_to_env(_args)
 # rojnik imports (after env setup)
 # ---------------------------------------------------------------------------
 
-import rojnik  # noqa: F401  — triggers logging setup  # noqa: E402
-
-from rojnik.agent.agent import Agent, AgentRegistry  # noqa: E402
-from rojnik.llm.client import LLMClient  # noqa: E402
-from rojnik.tools.builtins.delegate import make_delegate_tool  # noqa: E402
-from rojnik.tools.builtins.files import list_directory, read_file  # noqa: E402
-from rojnik.tools.builtins.shell import shell_exec  # noqa: E402
-
 # ---------------------------------------------------------------------------
 # Textual / Rich imports
 # ---------------------------------------------------------------------------
-
 from rich.markup import escape as markup_escape  # noqa: E402
 from textual import on, work  # noqa: E402
 from textual.app import App, ComposeResult  # noqa: E402
@@ -139,6 +142,12 @@ from textual.binding import Binding  # noqa: E402
 from textual.containers import Horizontal  # noqa: E402
 from textual.widgets import Footer, Header, Input, RichLog  # noqa: E402
 from textual.worker import Worker  # noqa: E402
+
+import rojnik  # noqa: E402, F401 - triggers logging setup
+from rojnik.agent.agent import Agent  # noqa: E402
+from rojnik.llm.client import LLMClient  # noqa: E402
+from rojnik.tools.builtins.files import list_directory, read_file  # noqa: E402
+from rojnik.tools.builtins.shell import shell_exec  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Tool call formatter
@@ -180,6 +189,8 @@ def _format_tool_call(name: str, args_json: str) -> str:
 def build_harness(
     llm: LLMClient,
     on_tool_call: Callable[[str, str], None],
+    skills: list[str] | None = None,
+    skill_mode: Literal["eager", "on_demand"] = "eager",
 ) -> Agent:
     """
     Assemble the multi-agent system and return the orchestrator.
@@ -197,6 +208,8 @@ def build_harness(
         tools=[read_file, list_directory],
         llm=llm,
         on_tool_call=on_tool_call,
+        skills=skills,
+        skill_mode=skill_mode,
     )
 
     shell_agent = Agent(
@@ -211,11 +224,6 @@ def build_harness(
         on_tool_call=on_tool_call,
     )
 
-    registry = AgentRegistry()
-    registry.register_many(file_agent, shell_agent)
-
-    delegate = make_delegate_tool(registry)
-
     orchestrator = Agent(
         name="orchestrator",
         system_prompt=(
@@ -225,11 +233,11 @@ def build_harness(
             "  - shell_executor: runs shell commands.\n\n"
             "When the user gives you a task:\n"
             "1. Break it into subtasks.\n"
-            "2. Delegate each subtask to the appropriate agent using delegate_to_agent.\n"
+            "2. Call the appropriate agent tool for each subtask.\n"
             "3. Synthesise the results into a clear final answer.\n\n"
             "You can call multiple agents in a single response to run them in parallel."
         ),
-        tools=[delegate],
+        tools=[file_agent.as_tool(), shell_agent.as_tool()],
         llm=llm,
         on_tool_call=on_tool_call,
     )
@@ -337,7 +345,12 @@ class ChatApp(App):
 
         await MemoryStore.get()
         llm = LLMClient()
-        self._agent = build_harness(llm, on_tool_call=self._on_tool_call)
+        self._agent = build_harness(
+            llm,
+            on_tool_call=self._on_tool_call,
+            skills=_args.skill,
+            skill_mode=_args.skill_mode,
+        )
 
         self._log.write(f"[dim]Ready  ·  DB: {self._db_path}[/]")
         self._log.write("[dim]Type a message and press enter.[/]")

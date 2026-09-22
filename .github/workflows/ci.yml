@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4
@@ -33,3 +33,9 @@ jobs:
         env:
           OPENAI_API_KEY: sk-test-dummy
         run: pytest --tb=short -q
+
+      - name: Run lint checks
+        run: ruff check .
+
+      - name: Build distributions
+        run: python -m build

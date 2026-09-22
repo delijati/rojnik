@@ -20,7 +20,8 @@ Loop flow
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -183,8 +184,10 @@ async def run_loop(
             token = current_session_id.set(state.session_id)
             t0 = time.perf_counter()
             dispatch_tasks = [tool_registry.dispatch(call) for call in response.tool_calls]
-            results: list[tuple[str, str]] = await asyncio.gather(*dispatch_tasks)
-            current_session_id.reset(token)
+            try:
+                results: list[tuple[str, str]] = await asyncio.gather(*dispatch_tasks)
+            finally:
+                current_session_id.reset(token)
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
             logger.debug(
@@ -196,7 +199,7 @@ async def run_loop(
             )
 
             # Persist tool results and append result messages
-            for call, (call_id, result_str) in zip(response.tool_calls, results):
+            for call, (call_id, result_str) in zip(response.tool_calls, results, strict=True):
                 duration_per_tool = elapsed_ms // max(len(results), 1)
                 is_error = result_str.startswith("ERROR:")
                 await store.save_tool_result(

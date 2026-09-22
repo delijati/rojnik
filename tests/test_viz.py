@@ -6,15 +6,14 @@ import sqlite3
 import sys
 import tempfile
 
-import pytest
 import anyio  # noqa: F401  — registers the anyio pytest plugin
+import pytest
 
 # Make examples/ importable without installing the package
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "examples"))
 
 import viz  # noqa: E402  (import after sys.path manipulation)
 from viz import ContentPane, VizApp
-
 
 # ---------------------------------------------------------------------------
 # Helpers

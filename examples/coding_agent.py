@@ -1,5 +1,5 @@
 """
-Coding agent example — demonstrates the full multi-rojnik with
+Coding agent example — demonstrates a multi-agent rojnik harness with
 support for OpenAI, DeepSeek, and any local OpenAI-compatible LLM server.
 
 Architecture
@@ -7,15 +7,14 @@ Architecture
   orchestrator
     ├── file_reader     (read_file, list_directory)
     ├── shell_executor  (shell_exec)
-    └── mcp_agent       (tools from the MCP server)
+    └── mcp_agent       (optional tools from an MCP server)
 
-An MCP server is always spawned alongside the harness.  The bundled
-mcp_server.py (get_time, roll_dice) is used by default; pass --mcp-server
-to use a different one.
+Pass --mcp-server to add an MCP specialist. The core example does not require
+the optional MCP dependency.
 
 Provider quick-start
 --------------------
-  # OpenAI (default) — uses bundled mcp_server.py
+  # OpenAI (default)
   OPENAI_API_KEY=sk-... python examples/coding_agent.py
 
   # DeepSeek
@@ -25,9 +24,9 @@ Provider quick-start
   python examples/coding_agent.py --provider local \\
       --base-url http://localhost:8080/v1 --model qwen2.5-coder
 
-  # Custom MCP server
+  # Bundled MCP demo server
   OPENAI_API_KEY=sk-... python examples/coding_agent.py \\
-      --mcp-server /usr/local/bin/my-mcp-server
+      --mcp-server "python examples/mcp_server.py"
 
   # Custom task
   OPENAI_API_KEY=sk-... python examples/coding_agent.py \\
@@ -48,8 +47,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import sys
-from pathlib import Path
+import shlex
+from typing import Literal
 
 # ---------------------------------------------------------------------------
 # Provider / model / key must be set in the environment BEFORE rojnik
@@ -62,7 +61,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Multi-agent coding assistant — supports OpenAI, DeepSeek, "
-            "and local LLMs, with MCP server tools always available."
+            "local LLMs, and optional MCP server tools."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
@@ -93,13 +92,25 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mcp-server",
         dest="mcp_server",
-        nargs="+",
-        metavar="WORD",
+        metavar="COMMAND",
         default=None,
         help=(
-            "MCP server command to spawn (default: python examples/mcp_server.py).  "
-            "Example: --mcp-server /usr/local/bin/my-mcp-server"
+            "Optional MCP server command, parsed with shell-like quoting. "
+            "Example: --mcp-server 'python examples/mcp_server.py'"
         ),
+    )
+    parser.add_argument(
+        "--skill",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="SKILL.md file or containing directory. Repeat for multiple skills.",
+    )
+    parser.add_argument(
+        "--skill-mode",
+        choices=["eager", "on_demand"],
+        default="eager",
+        help="Include full skills in the prompt or load them with a tool. Default: eager.",
     )
     parser.add_argument(
         "task",
@@ -129,30 +140,23 @@ def _apply_args_to_env(args: argparse.Namespace) -> None:
 _args = _parse_args()
 _apply_args_to_env(_args)
 
-import rojnik  # noqa: F401 — triggers logging setup  # noqa: E402
-
-from rojnik.agent.agent import Agent, AgentRegistry  # noqa: E402
+import rojnik  # noqa: E402, F401 - triggers logging setup
+from rojnik.agent.agent import Agent  # noqa: E402
 from rojnik.llm.client import LLMClient  # noqa: E402
-from rojnik.mcp import mcp_to_tools  # noqa: E402
-from rojnik.tools.builtins.delegate import make_delegate_tool  # noqa: E402
 from rojnik.tools.builtins.files import list_directory, read_file  # noqa: E402
 from rojnik.tools.builtins.shell import shell_exec  # noqa: E402
-
-from mcp import ClientSession  # noqa: E402
-from mcp.client.stdio import StdioServerParameters, stdio_client  # noqa: E402
-
-# Default MCP server — the bundled demo server next to this file
-_DEFAULT_MCP_CMD = [sys.executable, str(Path(__file__).parent / "mcp_server.py")]
-
 
 # ---------------------------------------------------------------------------
 # Harness assembly
 # ---------------------------------------------------------------------------
 
-def build_harness(llm: LLMClient, mcp_tools: list) -> Agent:
+def build_harness(
+    llm: LLMClient,
+    mcp_tools: list | None = None,
+    skills: list[str] | None = None,
+    skill_mode: Literal["eager", "on_demand"] = "eager",
+) -> Agent:
     """Assemble the multi-agent system and return the orchestrator."""
-
-    tool_names = [t.tool_schema.function.name for t in mcp_tools]  # type: ignore[attr-defined]
 
     file_agent = Agent(
         name="file_reader",
@@ -163,6 +167,8 @@ def build_harness(llm: LLMClient, mcp_tools: list) -> Agent:
         ),
         tools=[read_file, list_directory],
         llm=llm,
+        skills=skills,
+        skill_mode=skill_mode,
     )
 
     shell_agent = Agent(
@@ -176,34 +182,41 @@ def build_harness(llm: LLMClient, mcp_tools: list) -> Agent:
         llm=llm,
     )
 
-    mcp_agent = Agent(
-        name="mcp_agent",
-        system_prompt=(
-            "You are a specialist that calls external tools exposed via MCP "
-            f"(Model Context Protocol).  Available tools: {', '.join(tool_names)}.  "
-            "Use them to answer the request, then return a clear summary."
-        ),
-        tools=mcp_tools,
-        llm=llm,
-    )
+    specialists = [file_agent, shell_agent]
+    descriptions = [
+        "  - file_reader: reads files and lists directories.",
+        "  - shell_executor: runs shell commands.",
+    ]
 
-    registry = AgentRegistry()
-    registry.register_many(file_agent, shell_agent, mcp_agent)
+    if mcp_tools:
+        tool_names = [t.tool_schema.function.name for t in mcp_tools]  # type: ignore[attr-defined]
+        specialists.append(
+            Agent(
+                name="mcp_agent",
+                system_prompt=(
+                    "You call external tools exposed via MCP. "
+                    f"Available tools: {', '.join(tool_names)}. "
+                    "Use them to answer the request, then return a clear summary."
+                ),
+                tools=mcp_tools,
+                llm=llm,
+            )
+        )
+        descriptions.append(f"  - mcp_agent: calls MCP tools ({', '.join(tool_names)}).")
 
     orchestrator = Agent(
         name="orchestrator",
         system_prompt=(
-            "You are a senior software engineer coordinating a team of specialist agents:\n"
-            "  - file_reader: reads files and lists directories.\n"
-            "  - shell_executor: runs shell commands.\n"
-            f"  - mcp_agent: calls external MCP tools ({', '.join(tool_names)}).\n\n"
+            "You are a senior software engineer coordinating specialist agents:\n"
+            + "\n".join(descriptions)
+            + "\n\n"
             "When given a task:\n"
             "1. Break it into subtasks.\n"
-            "2. Delegate each subtask to the right agent via delegate_to_agent.\n"
+            "2. Call the right agent tool for each subtask.\n"
             "3. Synthesise the results into a clear final answer.\n\n"
-            "You can delegate to multiple agents in a single response to run them in parallel."
+            "You can call multiple agents in one response to run them in parallel."
         ),
-        tools=[make_delegate_tool(registry)],
+        tools=[agent.as_tool() for agent in specialists],
         llm=llm,
     )
 
@@ -215,8 +228,7 @@ def build_harness(llm: LLMClient, mcp_tools: list) -> Agent:
 # ---------------------------------------------------------------------------
 
 _DEFAULT_TASK = (
-    "What time is it right now?  Also list the contents of /work and tell me "
-    "what Python version is available."
+    "List the contents of the current directory and tell me what Python version is available."
 )
 
 
@@ -224,30 +236,48 @@ async def main() -> None:
     from rojnik.config import settings
 
     task = " ".join(_args.task) if _args.task else _DEFAULT_TASK
-    cmd = _args.mcp_server or _DEFAULT_MCP_CMD
-
     print(
         f"\nProvider  : {settings.provider}"
         f"\nModel     : {settings.model}"
         f"\nBase URL  : {settings.get_base_url() or 'https://api.openai.com/v1 (default)'}"
-        f"\nMCP cmd   : {' '.join(cmd)}"
+        f"\nMCP cmd   : {_args.mcp_server or '(disabled)'}"
         f"\nTask      : {task}"
         f"\n{'=' * 60}"
     )
 
     llm = LLMClient()
-    params = StdioServerParameters(command=cmd[0], args=cmd[1:])
-    errlog = open(os.devnull, "w")
-    try:
-        async with stdio_client(params, errlog=errlog) as (r, w):
-            async with ClientSession(r, w) as session:
-                await session.initialize()
-                mcp_tools = await mcp_to_tools(session)
-                print(f"MCP tools : {[t.tool_schema.function.name for t in mcp_tools]}")  # type: ignore[attr-defined]
-                print("=" * 60)
-                result = await build_harness(llm, mcp_tools).run(task)
-    finally:
-        errlog.close()
+    if _args.mcp_server:
+        from mcp import ClientSession
+        from mcp.client.stdio import StdioServerParameters, stdio_client
+
+        from rojnik.mcp import mcp_to_tools
+
+        cmd = shlex.split(_args.mcp_server)
+        if not cmd:
+            raise ValueError("--mcp-server command cannot be empty")
+        params = StdioServerParameters(command=cmd[0], args=cmd[1:])
+        with open(os.devnull, "w") as errlog:
+            async with stdio_client(params, errlog=errlog) as (reader, writer):
+                async with ClientSession(reader, writer) as session:
+                    await session.initialize()
+                    mcp_tools = await mcp_to_tools(session)
+                    print(
+                        "MCP tools : "
+                        f"{[t.tool_schema.function.name for t in mcp_tools]}"  # type: ignore[attr-defined]
+                    )
+                    print("=" * 60)
+                    result = await build_harness(
+                        llm,
+                        mcp_tools,
+                        skills=_args.skill,
+                        skill_mode=_args.skill_mode,
+                    ).run(task)
+    else:
+        result = await build_harness(
+            llm,
+            skills=_args.skill,
+            skill_mode=_args.skill_mode,
+        ).run(task)
 
     print(f"\n{'=' * 60}\nResult:\n{result}")
 

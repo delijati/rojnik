@@ -11,7 +11,7 @@ Covers:
   4. Bridge — branded callables; callable invocation; error propagation.
 
 Run with:
-  /work/venv/bin/python -m pytest tests/test_mcp.py -v
+  python -m pytest tests/test_mcp.py -v
 """
 
 from __future__ import annotations
@@ -27,7 +27,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mcp import ClientSession  # noqa: E402
-from mcp.client.stdio import StdioServerParameters, get_default_environment, stdio_client  # noqa: E402
+from mcp.client.stdio import (  # noqa: E402
+    StdioServerParameters,
+    get_default_environment,
+    stdio_client,
+)
 
 from rojnik.mcp import mcp_to_tools  # noqa: E402
 

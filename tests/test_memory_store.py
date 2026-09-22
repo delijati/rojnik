@@ -1,7 +1,6 @@
 """Tests for memory/store.py — MemoryStore CRUD."""
 
 
-import pytest
 
 from rojnik.llm.schemas import (
     AssistantMessage,
@@ -11,7 +10,6 @@ from rojnik.llm.schemas import (
     UserMessage,
 )
 from rojnik.memory.store import MemoryStore
-
 
 # ---------------------------------------------------------------------------
 # Sessions
@@ -29,7 +27,6 @@ class TestSessions:
         assert child != parent
 
     async def test_close_session_updates_status(self, store):
-        from sqlalchemy import select
         from rojnik.memory.models import Session
 
         sid = await store.create_session("agent_a")
@@ -43,7 +40,6 @@ class TestSessions:
         assert row.finished_at is not None
 
     async def test_close_session_stores_result_preview(self, store):
-        from sqlalchemy import select
         from rojnik.memory.models import Session
 
         sid = await store.create_session("agent_a")
@@ -125,6 +121,7 @@ class TestMessages:
 class TestToolResults:
     async def test_save_tool_result_success(self, store):
         from sqlalchemy import select
+
         from rojnik.memory.models import ToolResult
 
         sid = await store.create_session("a")
@@ -149,6 +146,7 @@ class TestToolResults:
 
     async def test_save_tool_result_with_error(self, store):
         from sqlalchemy import select
+
         from rojnik.memory.models import ToolResult
 
         sid = await store.create_session("a")

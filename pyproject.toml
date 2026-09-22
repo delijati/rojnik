@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,17 +8,18 @@ version = "0.1.0"
 description = "A minimal, from-scratch async agentic harness with multi-agent support"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Josip Delic", email = "delijati@gmail.com" }]
 keywords = ["agent", "llm", "openai", "agentic", "ai"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Framework :: AsyncIO",
 ]
@@ -30,17 +31,21 @@ dependencies = [
     "aiosqlite>=0.19",
     "loguru>=0.7",
     "tiktoken>=0.5",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "build>=1.2",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "ruff>=0.8",
     "textual>=8.0",
 ]
 # Install every supported provider's SDK alongside the core package.
 # Only install what you actually use.
 deepseek  = []          # DeepSeek uses the openai SDK — no extra install needed
+local     = []          # OpenAI-compatible local servers need no extra SDK
 mcp       = ["mcp>=1.0"]
 
 [project.urls]

@@ -12,28 +12,29 @@ Key concerns
 
 
 import os
+
 import pytest
 
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-dummy")
 
 import rojnik  # noqa: F401  — triggers logging setup
-
 from rojnik.llm.schemas import LLMResponse, ToolCallPart
 from rojnik.memory.store import MemoryStore
-
 
 # ---------------------------------------------------------------------------
 # Singleton reset — runs around EVERY test automatically
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def reset_singletons():
+async def reset_singletons():
     """Wipe module-level singletons so every test starts clean."""
     import rojnik.agent.agent as agent_module
 
     MemoryStore._instance = None
     agent_module._llm_instance = None
     yield
+    if MemoryStore._instance is not None:
+        await MemoryStore._instance._engine.dispose()
     MemoryStore._instance = None
     agent_module._llm_instance = None
 

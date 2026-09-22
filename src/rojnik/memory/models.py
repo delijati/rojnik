@@ -12,8 +12,7 @@ execution tree when a subagent is spawned by a parent agent.
 """
 
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     DateTime,
@@ -27,7 +26,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):
@@ -41,18 +40,18 @@ class Session(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     agent_name: Mapped[str] = mapped_column(String(128), nullable=False)
-    parent_session_id: Mapped[Optional[str]] = mapped_column(
+    parent_session_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True
     )
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="running"
     )  # running | completed | error | max_iterations
-    task_preview: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    result_preview: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    task_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, server_default=func.now()
     )
-    finished_at: Mapped[Optional[datetime]] = mapped_column(
+    finished_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
@@ -76,11 +75,11 @@ class DBMessage(Base):
     )
     seq: Mapped[int] = mapped_column(Integer, nullable=False)  # ordering within session
     role: Mapped[str] = mapped_column(String(32), nullable=False)
-    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
     # For assistant messages with tool_calls: serialised JSON list
-    tool_calls_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tool_calls_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # For tool result messages
-    tool_call_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    tool_call_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, server_default=func.now()
@@ -100,9 +99,9 @@ class ToolResult(Base):
     )
     tool_call_id: Mapped[str] = mapped_column(String(64), nullable=False)
     tool_name: Mapped[str] = mapped_column(String(128), nullable=False)
-    input_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    output: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    input_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, server_default=func.now()

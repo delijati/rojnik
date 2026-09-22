@@ -31,12 +31,9 @@ The registry picks up any callable that has `.is_tool == True`.
 
 import asyncio
 import inspect
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, get_type_hints
-
-# inspect.iscoroutinefunction is the preferred API from Python 3.12+;
-# asyncio.iscoroutinefunction is deprecated and will be removed in 3.16.
-_is_coroutine = inspect.iscoroutinefunction
+from typing import Any, get_type_hints
 
 from pydantic import create_model
 from pydantic.fields import FieldInfo
@@ -47,6 +44,9 @@ from rojnik.llm.schemas import (
     ToolSchema,
 )
 
+# inspect.iscoroutinefunction is the preferred API from Python 3.12+;
+# asyncio.iscoroutinefunction is deprecated and will be removed in 3.16.
+_is_coroutine = inspect.iscoroutinefunction
 
 # ---------------------------------------------------------------------------
 # Helpers

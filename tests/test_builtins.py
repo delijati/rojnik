@@ -1,13 +1,9 @@
 """Tests for tools/builtins/ — read_file, list_directory, shell_exec."""
 
 
-import asyncio
-import os
-import pytest
 
 from rojnik.tools.builtins.files import list_directory, read_file
 from rojnik.tools.builtins.shell import shell_exec
-
 
 # ---------------------------------------------------------------------------
 # read_file
