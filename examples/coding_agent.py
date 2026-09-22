@@ -129,8 +129,6 @@ def _apply_args_to_env(args: argparse.Namespace) -> None:
 _args = _parse_args()
 _apply_args_to_env(_args)
 
-sys.path.insert(0, "/work")
-
 import rojnik  # noqa: F401 — triggers logging setup  # noqa: E402
 
 from rojnik.agent.agent import Agent, AgentRegistry  # noqa: E402

@@ -51,7 +51,7 @@ def setup_logging(log_level: str = "INFO", log_file: str = "agent.log") -> None:
         format=_CONSOLE_FORMAT,
         colorize=True,
         backtrace=True,
-        diagnose=True,
+        diagnose=False,
     )
 
     # --- JSON file sink ---

@@ -13,13 +13,13 @@ The final answer streams token-by-token into a preview bar above the input.
 Provider quick-start
 --------------------
   # OpenAI (default)
-  OPENAI_API_KEY=sk-... /work/venv/bin/python examples/chat.py
+  OPENAI_API_KEY=sk-... python examples/chat.py
 
   # DeepSeek
-  /work/venv/bin/python examples/chat.py --provider deepseek --api-key sk-...
+  python examples/chat.py --provider deepseek --api-key sk-...
 
   # Local llama.cpp / Ollama
-  /work/venv/bin/python examples/chat.py --provider local \\
+  python examples/chat.py --provider local \\
       --base-url http://localhost:8080/v1 --model mistral
 
 Keys
@@ -29,7 +29,7 @@ Keys
 
 Session history is written to --db (default: chat.db).
 Browse it afterwards with:
-  /work/venv/bin/python examples/viz.py --db chat.db
+  python examples/viz.py --db chat.db
 """
 
 from __future__ import annotations
@@ -37,7 +37,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Callable
 
@@ -120,8 +119,6 @@ _apply_args_to_env(_args)
 # ---------------------------------------------------------------------------
 # rojnik imports (after env setup)
 # ---------------------------------------------------------------------------
-
-sys.path.insert(0, "/work")
 
 import rojnik  # noqa: F401  — triggers logging setup  # noqa: E402
 

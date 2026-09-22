@@ -18,9 +18,7 @@ Loop flow
 4.  If iteration >= max_iterations → persist with status "max_iterations", raise.
 """
 
-
 import asyncio
-import json
 import time
 from typing import TYPE_CHECKING, Callable
 
@@ -184,9 +182,7 @@ async def run_loop(
             # Set the context var so delegate_to_agent can read the session ID
             token = current_session_id.set(state.session_id)
             t0 = time.perf_counter()
-            dispatch_tasks = [
-                tool_registry.dispatch(call) for call in response.tool_calls
-            ]
+            dispatch_tasks = [tool_registry.dispatch(call) for call in response.tool_calls]
             results: list[tuple[str, str]] = await asyncio.gather(*dispatch_tasks)
             current_session_id.reset(token)
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
@@ -234,12 +230,6 @@ async def run_loop(
         partial = response.content or ""
         state.status = "error"
         state.result = partial
-        await store.close_session(
-            state.session_id,
-            status="error",
-            result=partial,
-            total_tokens=state.total_tokens,
-        )
         _reason_labels: dict[str, str] = {
             "length": "token limit reached",
             "content_filter": "content filtered by provider",
@@ -276,6 +266,5 @@ async def run_loop(
         limit=limit,
     )
     raise MaxIterationsError(
-        f"Agent {state.agent_name!r} exceeded {limit} iterations "
-        f"(session {state.session_id})."
+        f"Agent {state.agent_name!r} exceeded {limit} iterations (session {state.session_id})."
     )

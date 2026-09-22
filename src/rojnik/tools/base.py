@@ -166,7 +166,7 @@ def tool(description: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]
                 return await fn(**clean_kwargs)
             else:
                 # Run sync function in thread executor to avoid blocking
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 return await loop.run_in_executor(None, lambda: fn(**clean_kwargs))
 
         # Attach metadata for the registry to consume

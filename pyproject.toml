@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "rojnik"
@@ -9,7 +9,7 @@ description = "A minimal, from-scratch async agentic harness with multi-agent su
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "Your Name", email = "you@example.com" }]
+authors = [{ name = "Josip Delic", email = "delijati@gmail.com" }]
 keywords = ["agent", "llm", "openai", "agentic", "ai"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -36,34 +36,23 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    "hatchling",
     "textual>=8.0",
 ]
 # Install every supported provider's SDK alongside the core package.
 # Only install what you actually use.
-anthropic = ["anthropic>=0.30"]
 deepseek  = []          # DeepSeek uses the openai SDK — no extra install needed
 mcp       = ["mcp>=1.0"]
 
 [project.urls]
-Repository = "https://github.com/your-org/rojnik"
-Issues     = "https://github.com/your-org/rojnik/issues"
+Repository = "https://github.com/delijati/rojnik"
+Issues     = "https://github.com/delijati/rojnik/issues"
 
 # ---------------------------------------------------------------------------
-# Hatch build — src layout: package lives under src/
+# Setuptools — src layout
 # ---------------------------------------------------------------------------
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/rojnik"]
-
-[tool.hatch.build.targets.sdist]
-include = [
-    "src/",
-    "tests/",
-    "examples/",
-    "README.md",
-    "pyproject.toml",
-]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 # ---------------------------------------------------------------------------
 # Pytest
