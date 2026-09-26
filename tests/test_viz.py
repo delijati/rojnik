@@ -1,4 +1,5 @@
 """Headless integration tests for examples/viz.py."""
+
 from __future__ import annotations
 
 import os
@@ -18,6 +19,7 @@ from viz import ContentPane, VizApp
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_db(path: str) -> None:
     """Create a minimal agent.db fixture with one root session."""
@@ -88,6 +90,7 @@ def _make_db(path: str) -> None:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.anyio
 async def test_startup_shows_session() -> None:

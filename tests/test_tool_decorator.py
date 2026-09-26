@@ -1,6 +1,5 @@
 """Tests for tools/base.py — the @tool decorator."""
 
-
 import pytest
 
 from rojnik.tools.base import tool

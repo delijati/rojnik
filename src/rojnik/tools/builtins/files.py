@@ -2,17 +2,18 @@
 Built-in file system tools: read_file and list_directory.
 """
 
-
 import os
 
 from rojnik.tools.base import tool
 
 
-@tool(description=(
-    "Read the text contents of a file at the given path. "
-    "Returns the file contents as a string. "
-    "Use encoding='utf-8' by default; pass a different encoding if needed."
-))
+@tool(
+    description=(
+        "Read the text contents of a file at the given path. "
+        "Returns the file contents as a string. "
+        "Use encoding='utf-8' by default; pass a different encoding if needed."
+    )
+)
 def read_file(path: str, encoding: str = "utf-8") -> str:
     abs_path = os.path.abspath(path)
     if not os.path.exists(abs_path):
@@ -26,12 +27,14 @@ def read_file(path: str, encoding: str = "utf-8") -> str:
         return f"ERROR: Could not read {abs_path}: {exc}"
 
 
-@tool(description=(
-    "List the contents of a directory. "
-    "Returns a newline-separated list of entries. "
-    "Directories are suffixed with '/'. "
-    "Pass recursive=True to walk subdirectories (max depth 3)."
-))
+@tool(
+    description=(
+        "List the contents of a directory. "
+        "Returns a newline-separated list of entries. "
+        "Directories are suffixed with '/'. "
+        "Pass recursive=True to walk subdirectories (max depth 3)."
+    )
+)
 def list_directory(path: str = ".", recursive: bool = False) -> str:
     abs_path = os.path.abspath(path)
     if not os.path.exists(abs_path):

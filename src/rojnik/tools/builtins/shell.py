@@ -8,7 +8,6 @@ Always audit the system prompt of any agent given this tool.
 Consider restricting the working directory and using a timeout.
 """
 
-
 import asyncio
 import os
 
@@ -17,13 +16,15 @@ from loguru import logger
 from rojnik.tools.base import tool
 
 
-@tool(description=(
-    "Execute a shell command in a subprocess and return its stdout + stderr. "
-    "The command is run with /bin/sh -c in the given working directory "
-    "(defaults to current directory). "
-    "A timeout (in seconds, default 30) kills the process if exceeded. "
-    "Returns combined stdout and stderr as a single string."
-))
+@tool(
+    description=(
+        "Execute a shell command in a subprocess and return its stdout + stderr. "
+        "The command is run with /bin/sh -c in the given working directory "
+        "(defaults to current directory). "
+        "A timeout (in seconds, default 30) kills the process if exceeded. "
+        "Returns combined stdout and stderr as a single string."
+    )
+)
 async def shell_exec(
     command: str,
     workdir: str = ".",

@@ -67,23 +67,17 @@ def _make_mcp_caller(session: ClientSession, tool_name: str) -> Callable:
     the ``.is_tool`` and ``.tool_schema`` attributes directly so it can be
     passed anywhere a ``@tool``-decorated function is accepted.
     """
+
     async def _call(**kwargs: Any) -> str:
         result = await session.call_tool(tool_name, kwargs or None)
         if result.is_error:
             parts = [
-                b.text
-                for b in result.content
-                if isinstance(b, mcp_types.TextContent) and b.text
+                b.text for b in result.content if isinstance(b, mcp_types.TextContent) and b.text
             ]
             raise RuntimeError(
-                f"MCP tool '{tool_name}' returned error: "
-                + (" ".join(parts) or "(no detail)")
+                f"MCP tool '{tool_name}' returned error: " + (" ".join(parts) or "(no detail)")
             )
-        parts = [
-            b.text
-            for b in result.content
-            if isinstance(b, mcp_types.TextContent) and b.text
-        ]
+        parts = [b.text for b in result.content if isinstance(b, mcp_types.TextContent) and b.text]
         return "\n".join(parts) or "(empty response)"
 
     _call.__name__ = tool_name
@@ -112,7 +106,7 @@ async def mcp_to_tools(session: ClientSession) -> list[Callable]:
     tools: list[Callable] = []
     for t in listed.tools:
         fn = _make_mcp_caller(session, t.name)
-        fn.is_tool = True                         # type: ignore[attr-defined]
+        fn.is_tool = True  # type: ignore[attr-defined]
         fn.tool_schema = _mcp_tool_to_schema(t)  # type: ignore[attr-defined]
         tools.append(fn)
     return tools

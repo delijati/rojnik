@@ -12,7 +12,6 @@ of rojnik).  All other modules just do:
     logger.info("...", key=value)
 """
 
-
 import sys
 from typing import TYPE_CHECKING
 
@@ -58,12 +57,12 @@ def setup_logging(log_level: str = "INFO", log_file: str = "agent.log") -> None:
     logger.add(
         log_file,
         level="DEBUG",
-        serialize=True,          # writes newline-delimited JSON
+        serialize=True,  # writes newline-delimited JSON
         rotation="50 MB",
         retention="14 days",
         compression="gz",
         backtrace=True,
-        diagnose=False,          # don't embed local vars in prod log file
+        diagnose=False,  # don't embed local vars in prod log file
     )
 
     logger.debug("Logging initialised", log_level=log_level, log_file=log_file)

@@ -1,6 +1,5 @@
 """Tests for normalize_response_format() in rojnik.llm.schemas."""
 
-
 import pytest
 from pydantic import BaseModel
 

@@ -399,19 +399,14 @@ class ChatApp(App):
             self._stream_buffer.append(text)
             full = "".join(self._stream_buffer)
             self._stream.clear()
-            self._stream.write(
-                f"[bold yellow][[agent]][/]  {markup_escape(full)}[bold yellow]▋[/]"
-            )
+            self._stream.write(f"[bold yellow][[agent]][/]  {markup_escape(full)}[bold yellow]▋[/]")
 
         try:
             result = await self._agent.run(task, on_chunk=on_chunk)
             final = "".join(self._stream_buffer) or result or ""
             self._stream.display = False
             self._stream.clear()
-            self._log.write(
-                f"[bold yellow][[agent]][/]  "
-                f"{markup_escape(final or '(no response)')}"
-            )
+            self._log.write(f"[bold yellow][[agent]][/]  {markup_escape(final or '(no response)')}")
         except asyncio.CancelledError:
             self._stream.display = False
             self._stream.clear()

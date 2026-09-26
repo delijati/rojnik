@@ -21,7 +21,7 @@ A small async Python harness for building tool-using and multi-agent LLM applica
 
 ## Requirements
 
-- Python 3.11 or newer
+- Python 3.12 or newer
 - An API key for a hosted provider, or a local OpenAI-compatible server
 
 ## Installation

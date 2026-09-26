@@ -1,6 +1,5 @@
 """Tests for the multi-agent delegate tool and AgentRegistry."""
 
-
 import pytest
 
 from rojnik.agent.agent import Agent, AgentRegistry
@@ -11,6 +10,7 @@ from tests.conftest import MockLLMClient, stop_response, tool_call_response
 # ---------------------------------------------------------------------------
 # AgentRegistry
 # ---------------------------------------------------------------------------
+
 
 class TestAgentRegistry:
     def _agent(self, name="test"):
@@ -51,6 +51,7 @@ class TestAgentRegistry:
 # ---------------------------------------------------------------------------
 # make_delegate_tool — schema and metadata
 # ---------------------------------------------------------------------------
+
 
 class TestMakeDelegateTool:
     def test_returns_tool_decorated_function(self):
@@ -126,6 +127,7 @@ class TestAgentAsTool:
 # make_delegate_tool — execution
 # ---------------------------------------------------------------------------
 
+
 class TestDelegateExecution:
     async def test_delegates_to_correct_agent(self, store):
         """Calling delegate should invoke the target agent's run()."""
@@ -188,6 +190,7 @@ class TestDelegateExecution:
 # End-to-end: orchestrator delegates to a subagent via the loop
 # ---------------------------------------------------------------------------
 
+
 class TestOrchestratorLoop:
     async def test_orchestrator_calls_subagent_and_gets_result(self, store):
         """Full loop with a delegate call: orchestrator → subagent → answer."""
@@ -212,11 +215,20 @@ class TestOrchestratorLoop:
         orchestrator_tool_registry.register(delegate)
 
         # Orchestrator: first response delegates, second response is final
-        orchestrator_llm = MockLLMClient([
-            tool_call_response([("c1", "delegate_to_agent",
-                                 '{"agent_name":"file_reader","task":"count files"}')]),
-            stop_response("The subagent found 42 files."),
-        ])
+        orchestrator_llm = MockLLMClient(
+            [
+                tool_call_response(
+                    [
+                        (
+                            "c1",
+                            "delegate_to_agent",
+                            '{"agent_name":"file_reader","task":"count files"}',
+                        )
+                    ]
+                ),
+                stop_response("The subagent found 42 files."),
+            ]
+        )
 
         # Create orchestrator session manually
         orch_sid = await store.create_session("orchestrator", task="count files")
@@ -243,10 +255,12 @@ class TestOrchestratorLoop:
             system_prompt="Do specialist work.",
             llm=subagent_llm,
         )
-        orchestrator_llm = MockLLMClient([
-            tool_call_response([("c1", "specialist", '{"task":"do work"}')]),
-            stop_response("Used the specialist result."),
-        ])
+        orchestrator_llm = MockLLMClient(
+            [
+                tool_call_response([("c1", "specialist", '{"task":"do work"}')]),
+                stop_response("Used the specialist result."),
+            ]
+        )
         orchestrator = Agent(
             name="orchestrator",
             system_prompt="Call the specialist.",

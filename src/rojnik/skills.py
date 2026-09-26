@@ -80,7 +80,9 @@ class Skill:
         if not isinstance(description, str) or not description.strip():
             raise SkillError(f"Skill file {skill_path} requires a non-empty string 'description'.")
         if not instructions:
-            raise SkillError(f"Skill file {skill_path} requires Markdown instructions after the front matter.")
+            raise SkillError(
+                f"Skill file {skill_path} requires Markdown instructions after the front matter."
+            )
 
         return cls(
             name=name,
@@ -121,7 +123,11 @@ def load_skills(
     names: set[str] = set()
     total_bytes = 0
     for source in sources:
-        skill = source if isinstance(source, Skill) else Skill.from_path(source, max_bytes=max_skill_bytes)
+        skill = (
+            source
+            if isinstance(source, Skill)
+            else Skill.from_path(source, max_bytes=max_skill_bytes)
+        )
         if not _SKILL_NAME_PATTERN.fullmatch(skill.name):
             raise SkillError(
                 f"Skill name {skill.name!r} may contain only letters, numbers, underscores, and hyphens."
@@ -140,9 +146,7 @@ def load_skills(
             )
         total_bytes += skill_bytes
         if total_bytes > max_total_skill_bytes:
-            raise SkillError(
-                f"Combined skill instructions exceed {max_total_skill_bytes} bytes."
-            )
+            raise SkillError(f"Combined skill instructions exceed {max_total_skill_bytes} bytes.")
         names.add(skill.name)
         skills.append(skill)
     return tuple(skills)

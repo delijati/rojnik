@@ -11,7 +11,6 @@ The parent_session_id FK on sessions lets you reconstruct the full
 execution tree when a subagent is spawned by a parent agent.
 """
 
-
 from datetime import UTC, datetime
 
 from sqlalchemy import (
@@ -51,17 +50,13 @@ class Session(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, server_default=func.now()
     )
-    finished_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
 
     messages: Mapped[list["DBMessage"]] = relationship(
         "DBMessage", back_populates="session", order_by="DBMessage.seq"
     )
-    tool_results: Mapped[list["ToolResult"]] = relationship(
-        "ToolResult", back_populates="session"
-    )
+    tool_results: Mapped[list["ToolResult"]] = relationship("ToolResult", back_populates="session")
 
 
 class DBMessage(Base):

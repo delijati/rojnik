@@ -17,7 +17,6 @@ Usage
     window = await builder.build(session_id, store, extra_messages=[user_msg])
 """
 
-
 import tiktoken
 from loguru import logger
 
@@ -181,5 +180,10 @@ class ContextBuilder:
                 tokens_used=system_tokens + tokens_used,
             )
 
-        kept = [msg for index, group in enumerate(groups) if index in kept_group_indexes for msg in group]
+        kept = [
+            msg
+            for index, group in enumerate(groups)
+            if index in kept_group_indexes
+            for msg in group
+        ]
         return system_msgs + kept

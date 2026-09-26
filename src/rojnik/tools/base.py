@@ -28,7 +28,6 @@ What the decorator does
 The registry picks up any callable that has `.is_tool == True`.
 """
 
-
 import asyncio
 import inspect
 from collections.abc import Callable
@@ -94,7 +93,10 @@ def _build_tool_schema(fn: Callable[..., Any], description: str) -> ToolSchema:
         properties[name] = prop
 
         if param.default is inspect.Parameter.empty or isinstance(param.default, FieldInfo):
-            if not (isinstance(param.default, FieldInfo) and param.default.default is not inspect.Parameter.empty):
+            if not (
+                isinstance(param.default, FieldInfo)
+                and param.default.default is not inspect.Parameter.empty
+            ):
                 required.append(name)
 
     return ToolSchema(
@@ -140,6 +142,7 @@ def _build_pydantic_validator(fn: Callable[..., Any]) -> type:
 # ---------------------------------------------------------------------------
 # The @tool decorator
 # ---------------------------------------------------------------------------
+
 
 def tool(description: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """

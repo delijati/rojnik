@@ -20,7 +20,6 @@ every parameter can also be passed directly to the constructor so that a
 caller can create a fully custom client without touching env vars.
 """
 
-
 import asyncio
 import time
 from collections.abc import Callable

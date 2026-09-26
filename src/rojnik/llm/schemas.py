@@ -5,7 +5,6 @@ These are the canonical types passed around the harness. The LLMClient
 converts between these and the raw openai SDK types internally.
 """
 
-
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -13,6 +12,7 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 # Message types
 # ---------------------------------------------------------------------------
+
 
 class SystemMessage(BaseModel):
     role: Literal["system"] = "system"
@@ -26,22 +26,24 @@ class UserMessage(BaseModel):
 
 class ToolCallPart(BaseModel):
     """A single function call within an assistant message."""
-    id: str                  # OpenAI call ID, e.g. "call_abc123"
-    name: str                # Function name
-    arguments: str           # Raw JSON string — validated by the tool registry
+
+    id: str  # OpenAI call ID, e.g. "call_abc123"
+    name: str  # Function name
+    arguments: str  # Raw JSON string — validated by the tool registry
 
 
 class AssistantMessage(BaseModel):
     role: Literal["assistant"] = "assistant"
-    content: str | None = None        # None when finish_reason == "tool_calls"
+    content: str | None = None  # None when finish_reason == "tool_calls"
     tool_calls: list[ToolCallPart] = Field(default_factory=list)
 
 
 class ToolResultMessage(BaseModel):
     """Carries a tool's output back to the model."""
+
     role: Literal["tool"] = "tool"
     tool_call_id: str
-    content: str             # Stringified result (or error message)
+    content: str  # Stringified result (or error message)
 
 
 # Union of all message types that can appear in a conversation.
@@ -51,6 +53,7 @@ Message = SystemMessage | UserMessage | AssistantMessage | ToolResultMessage
 # ---------------------------------------------------------------------------
 # LLM response
 # ---------------------------------------------------------------------------
+
 
 class LLMResponse(BaseModel):
     """Normalised response from a single chat completion call."""
@@ -80,11 +83,14 @@ class LLMResponse(BaseModel):
 # Tool schema (OpenAI function-calling format)
 # ---------------------------------------------------------------------------
 
+
 class ToolParameterSchema(BaseModel):
     """JSON Schema object describing a tool's parameters."""
+
     type: Literal["object"] = "object"
     properties: dict[str, Any] = Field(default_factory=dict)
     required: list[str] = Field(default_factory=list)
+    additionalProperties: bool = False
 
 
 class ToolFunctionSchema(BaseModel):
@@ -95,6 +101,7 @@ class ToolFunctionSchema(BaseModel):
 
 class ToolSchema(BaseModel):
     """Full tool descriptor in the format expected by the OpenAI `tools=` param."""
+
     type: Literal["function"] = "function"
     function: ToolFunctionSchema
 

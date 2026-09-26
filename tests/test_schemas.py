@@ -1,6 +1,5 @@
 """Tests for llm/schemas.py — Pydantic message and response models."""
 
-
 import pytest
 from pydantic import ValidationError
 
