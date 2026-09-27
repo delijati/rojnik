@@ -94,6 +94,36 @@ class TestLoopStop:
 # ---------------------------------------------------------------------------
 
 class TestLoopWithTools:
+    async def test_unknown_tool_is_returned_to_model_for_correction(self, store):
+        @tool(description="current tank stock")
+        async def get_tank_stock() -> str:
+            return "T-9"
+
+        llm = MockLLMClient(
+            [
+                tool_call_response([("c1", "get_tank_inventory", "{}")]),
+                tool_call_response([("c2", "get_tank_stock", "{}")]),
+                stop_response("T-9 ist vorhanden."),
+            ]
+        )
+        state = await _make_state(store)
+
+        result = await run_loop(
+            state=state,
+            task="Prüfe T-9",
+            llm=llm,
+            tool_registry=_registry_with(get_tank_stock),
+            store=store,
+            context_builder=ContextBuilder(),
+        )
+
+        assert result == "T-9 ist vorhanden."
+        assert len(llm.calls) == 3
+        messages = await store.get_messages(state.session_id)
+        errors = [message.content for message in messages if message.role == "tool"]
+        assert errors[0].startswith("ERROR:")
+        assert "get_tank_stock" in errors[0]
+
     async def test_tool_call_then_stop(self, store):
         @tool(description="add")
         async def add(a: int, b: int) -> int:

@@ -35,7 +35,7 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any, get_type_hints
 
-from pydantic import create_model
+from pydantic import ConfigDict, create_model
 from pydantic.fields import FieldInfo
 
 from rojnik.llm.schemas import (
@@ -134,7 +134,11 @@ def _build_pydantic_validator(fn: Callable[..., Any]) -> type:
         else:
             fields[name] = (annotation, param.default)
 
-    return create_model(f"_{fn.__name__}_Input", **fields)
+    return create_model(
+        f"_{fn.__name__}_Input",
+        __config__=ConfigDict(extra="forbid"),
+        **fields,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@ import pytest
 
 from rojnik.llm.schemas import ToolCallPart
 from rojnik.tools.base import tool
-from rojnik.tools.registry import ToolNotFoundError, ToolRegistry
+from rojnik.tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -111,10 +111,14 @@ class TestDispatch:
 # ---------------------------------------------------------------------------
 
 class TestDispatchErrors:
-    async def test_tool_not_found_raises(self, registry):
+    async def test_tool_not_found_returns_error_with_available_names(self, registry, add_tool):
+        registry.register(add_tool)
         call = ToolCallPart(id="c5", name="ghost", arguments="{}")
-        with pytest.raises(ToolNotFoundError):
-            await registry.dispatch(call)
+        call_id, result = await registry.dispatch(call)
+        assert call_id == "c5"
+        assert result.startswith("ERROR:")
+        assert "ghost" in result
+        assert "add" in result
 
     async def test_bad_json_returns_error_string(self, registry, add_tool):
         registry.register(add_tool)
@@ -132,3 +136,17 @@ class TestDispatchErrors:
         _, result = await registry.dispatch(call)
         assert result.startswith("ERROR:")
         assert "deliberate failure" in result
+
+    async def test_extra_arguments_are_rejected(self, registry, add_tool):
+        registry.register(add_tool)
+        call = ToolCallPart(id="c8", name="add", arguments='{"a": 1, "b": 2, "c": 3}')
+        _, result = await registry.dispatch(call)
+        assert result.startswith("ERROR:")
+        assert "c" in result
+
+    async def test_wrong_argument_types_are_rejected(self, registry, add_tool):
+        registry.register(add_tool)
+        call = ToolCallPart(id="c9", name="add", arguments='{"a": "eins", "b": 2}')
+        _, result = await registry.dispatch(call)
+        assert result.startswith("ERROR:")
+        assert "a" in result

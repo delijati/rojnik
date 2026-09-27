@@ -85,6 +85,7 @@ class ToolParameterSchema(BaseModel):
     type: Literal["object"] = "object"
     properties: dict[str, Any] = Field(default_factory=dict)
     required: list[str] = Field(default_factory=list)
+    additionalProperties: bool = False
 
 
 class ToolFunctionSchema(BaseModel):

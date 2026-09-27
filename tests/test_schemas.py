@@ -94,3 +94,7 @@ class TestToolSchema:
     def test_required_present_in_dict(self):
         d = self._schema().to_openai_dict()
         assert "x" in d["function"]["parameters"]["required"]
+
+    def test_function_schema_rejects_additional_parameters(self):
+        d = self._schema().to_openai_dict()
+        assert d["function"]["parameters"]["additionalProperties"] is False

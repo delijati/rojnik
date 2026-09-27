@@ -98,7 +98,12 @@ class ToolRegistry:
         """
         name = call.name
         if name not in self._tools:
-            raise ToolNotFoundError(f"No tool named {name!r} is registered.")
+            available = ", ".join(self.names()) or "none"
+            logger.warning("tool.dispatch.unknown", tool_name=name, available=available)
+            return call.id, (
+                f"ERROR: Tool {name!r} is not available. Available tools: {available}. "
+                "Use exactly one of these names."
+            )
 
         _, fn = self._tools[name]
 
