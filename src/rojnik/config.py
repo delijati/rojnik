@@ -24,7 +24,6 @@ Quick start examples
     AGENT_MODEL=llama3 python examples/coding_agent.py
 """
 
-
 import os
 from dataclasses import dataclass, field
 
@@ -33,9 +32,9 @@ PROVIDERS = ("openai", "deepseek", "local")
 
 # Default model per provider (can always be overridden via AGENT_MODEL)
 _DEFAULT_MODELS: dict[str, str] = {
-    "openai":    "gpt-4o",
-    "deepseek":  "deepseek-chat",
-    "local":     "llama3",
+    "openai": "gpt-4o",
+    "deepseek": "deepseek-chat",
+    "local": "llama3",
 }
 
 # DeepSeek's public API endpoint
@@ -55,28 +54,18 @@ class Settings:
     # API keys — each provider checks its own env var first,              #
     # then falls back to the generic AGENT_API_KEY.                       #
     # ------------------------------------------------------------------ #
-    openai_api_key: str = field(
-        default_factory=lambda: os.environ.get("OPENAI_API_KEY", "")
-    )
-    deepseek_api_key: str = field(
-        default_factory=lambda: os.environ.get("DEEPSEEK_API_KEY", "")
-    )
+    openai_api_key: str = field(default_factory=lambda: os.environ.get("OPENAI_API_KEY", ""))
+    deepseek_api_key: str = field(default_factory=lambda: os.environ.get("DEEPSEEK_API_KEY", ""))
     # Generic fallback / local server token
-    api_key: str = field(
-        default_factory=lambda: os.environ.get("AGENT_API_KEY", "")
-    )
+    api_key: str = field(default_factory=lambda: os.environ.get("AGENT_API_KEY", ""))
 
     # ------------------------------------------------------------------ #
     # Model & endpoint                                                     #
     # ------------------------------------------------------------------ #
     # AGENT_MODEL overrides the per-provider default set in __post_init__
-    model: str = field(
-        default_factory=lambda: os.environ.get("AGENT_MODEL", "")
-    )
+    model: str = field(default_factory=lambda: os.environ.get("AGENT_MODEL", ""))
     # AGENT_BASE_URL overrides the per-provider default (required for local)
-    base_url: str = field(
-        default_factory=lambda: os.environ.get("AGENT_BASE_URL", "")
-    )
+    base_url: str = field(default_factory=lambda: os.environ.get("AGENT_BASE_URL", ""))
 
     max_tokens: int = 4096
 
@@ -96,20 +85,14 @@ class Settings:
     # Storage                                                              #
     # ------------------------------------------------------------------ #
     db_url: str = field(
-        default_factory=lambda: os.environ.get(
-            "AGENT_DB_URL", "sqlite+aiosqlite:///./agent.db"
-        )
+        default_factory=lambda: os.environ.get("AGENT_DB_URL", "sqlite+aiosqlite:///./agent.db")
     )
 
     # ------------------------------------------------------------------ #
     # Logging                                                              #
     # ------------------------------------------------------------------ #
-    log_level: str = field(
-        default_factory=lambda: os.environ.get("AGENT_LOG_LEVEL", "INFO")
-    )
-    log_file: str = field(
-        default_factory=lambda: os.environ.get("AGENT_LOG_FILE", "agent.log")
-    )
+    log_level: str = field(default_factory=lambda: os.environ.get("AGENT_LOG_LEVEL", "INFO"))
+    log_file: str = field(default_factory=lambda: os.environ.get("AGENT_LOG_FILE", "agent.log"))
 
     # ------------------------------------------------------------------ #
     # Post-init: validate & fill in per-provider defaults                 #
@@ -117,8 +100,7 @@ class Settings:
     def __post_init__(self) -> None:
         if self.provider not in PROVIDERS:
             raise ValueError(
-                f"Unknown AGENT_PROVIDER={self.provider!r}. "
-                f"Choose one of: {', '.join(PROVIDERS)}"
+                f"Unknown AGENT_PROVIDER={self.provider!r}. Choose one of: {', '.join(PROVIDERS)}"
             )
 
         # Fill in model default when caller didn't specify one

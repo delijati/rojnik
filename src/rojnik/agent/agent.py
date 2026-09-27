@@ -121,9 +121,7 @@ class Agent:
             self.tool_registry.register(fn)
         if self.skills and skill_mode == "on_demand":
             if "load_skill" in self.tool_registry:
-                raise ValueError(
-                    "Tool name 'load_skill' is reserved when skill_mode='on_demand'."
-                )
+                raise ValueError("Tool name 'load_skill' is reserved when skill_mode='on_demand'.")
             self.tool_registry.register(make_load_skill_tool(self.skills))
 
         # LLM client — shared singleton by default
@@ -292,6 +290,7 @@ def _shared_llm() -> LLMClient:
 # ---------------------------------------------------------------------------
 # AgentRegistry
 # ---------------------------------------------------------------------------
+
 
 class AgentRegistry:
     """

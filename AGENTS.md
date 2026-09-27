@@ -53,7 +53,7 @@ Tests must not call hosted LLM APIs. Use `MockLLMClient` from `tests/conftest.py
 
 ## Style
 
-- Target Python 3.11+.
+- Target Python 3.12+.
 - Use type hints for public APIs.
 - Prefer small functions and direct control flow.
 - Add tests for behavior changes and failure paths.

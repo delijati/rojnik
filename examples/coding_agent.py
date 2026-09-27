@@ -150,6 +150,7 @@ from rojnik.tools.builtins.shell import shell_exec  # noqa: E402
 # Harness assembly
 # ---------------------------------------------------------------------------
 
+
 def build_harness(
     llm: LLMClient,
     mcp_tools: list | None = None,
@@ -262,8 +263,7 @@ async def main() -> None:
                     await session.initialize()
                     mcp_tools = await mcp_to_tools(session)
                     print(
-                        "MCP tools : "
-                        f"{[t.tool_schema.function.name for t in mcp_tools]}"  # type: ignore[attr-defined]
+                        f"MCP tools : {[t.tool_schema.function.name for t in mcp_tools]}"  # type: ignore[attr-defined]
                     )
                     print("=" * 60)
                     result = await build_harness(

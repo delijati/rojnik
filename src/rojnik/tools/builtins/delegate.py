@@ -41,7 +41,6 @@ just before dispatching tool calls so the delegate tool can attach
 the correct parent_session_id.
 """
 
-
 from collections.abc import Callable
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
@@ -55,9 +54,7 @@ if TYPE_CHECKING:
 
 # Context variable: the run_loop sets this before dispatching tool calls.
 # The delegate tool reads it to wire up parent_session_id in SQLite.
-current_session_id: ContextVar[str | None] = ContextVar(
-    "current_session_id", default=None
-)
+current_session_id: ContextVar[str | None] = ContextVar("current_session_id", default=None)
 
 
 def make_delegate_tool(registry: "AgentRegistry") -> Callable[..., Any]:
@@ -74,19 +71,18 @@ def make_delegate_tool(registry: "AgentRegistry") -> Callable[..., Any]:
     An async @tool-decorated function that can be registered on any Agent.
     """
 
-    @tool(description=(
-        "Delegate a task to a specialist subagent and return its response. "
-        f"Available agents: {', '.join(registry.names()) if len(registry) else '(none registered yet)'}. "
-        "Use this when the task requires a specialist capability you don't have directly. "
-        "The subagent will run its own ReAct loop and return a complete answer."
-    ))
+    @tool(
+        description=(
+            "Delegate a task to a specialist subagent and return its response. "
+            f"Available agents: {', '.join(registry.names()) if len(registry) else '(none registered yet)'}. "
+            "Use this when the task requires a specialist capability you don't have directly. "
+            "The subagent will run its own ReAct loop and return a complete answer."
+        )
+    )
     async def delegate_to_agent(agent_name: str, task: str) -> str:
         if agent_name not in registry:
             available = registry.names()
-            return (
-                f"ERROR: No agent named {agent_name!r}. "
-                f"Available agents: {available}"
-            )
+            return f"ERROR: No agent named {agent_name!r}. Available agents: {available}"
 
         parent_sid = current_session_id.get()
         logger.info(

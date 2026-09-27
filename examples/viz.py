@@ -36,6 +36,7 @@ from textual.widgets.tree import TreeNode
 # Data layer — plain sqlite3, no SQLAlchemy needed
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SessionRow:
     id: str
@@ -137,9 +138,9 @@ def load_tool_results(con: sqlite3.Connection, session_id: str) -> dict[str, dic
 # ---------------------------------------------------------------------------
 
 STATUS_STYLE = {
-    "completed":      "bold green",
-    "running":        "bold yellow",
-    "error":          "bold red",
+    "completed": "bold green",
+    "running": "bold yellow",
+    "error": "bold red",
     "max_iterations": "bold red",
 }
 
@@ -147,10 +148,10 @@ STATUS_STYLE = {
 _ERROR_STATUSES = {"error", "max_iterations"}
 
 ROLE_STYLE = {
-    "system":    ("dim",    "SYS "),
-    "user":      ("cyan",   "USR "),
+    "system": ("dim", "SYS "),
+    "user": ("cyan", "USR "),
     "assistant": ("yellow", "AST "),
-    "tool":      ("green",  "TOOL"),
+    "tool": ("green", "TOOL"),
 }
 
 
@@ -162,9 +163,9 @@ def _status_badge(status: str) -> str:
 
 def _session_label(s: SessionRow) -> str:
     """Single-line label used in the call tree."""
-    badge  = _status_badge(s.status)
-    tok    = f"[dim]{s.total_tokens:,} tok[/]"
-    dur    = f"[dim]{s.duration_s}[/]"
+    badge = _status_badge(s.status)
+    tok = f"[dim]{s.total_tokens:,} tok[/]"
+    dur = f"[dim]{s.duration_s}[/]"
     time_s = f"  [dim]{s.created_hm}[/]" if s.created_hm else ""
     # Append a short error hint so it's readable inline in the tree
     err_hint = ""
@@ -176,9 +177,9 @@ def _session_label(s: SessionRow) -> str:
 
 def _session_list_text(s: SessionRow) -> str:
     """Multi-line rich text card for the session list panel."""
-    badge  = _status_badge(s.status)
-    tok    = f"[dim]{s.total_tokens:,} tok[/]"
-    dur    = f"[dim]{s.duration_s}[/]"
+    badge = _status_badge(s.status)
+    tok = f"[dim]{s.total_tokens:,} tok[/]"
+    dur = f"[dim]{s.duration_s}[/]"
     time_s = f"[dim]{s.created_hm}[/]  " if s.created_hm else ""
 
     parts = [
@@ -187,12 +188,12 @@ def _session_list_text(s: SessionRow) -> str:
     ]
 
     if s.task_preview:
-        flat  = s.task_preview.replace("\n", " ")
+        flat = s.task_preview.replace("\n", " ")
         short = flat[:60].rstrip() + ("…" if len(flat) > 60 else "")
         parts.append(f"  [dim cyan]Task:[/] [dim]{short}[/]")
 
     if s.result_preview:
-        flat  = s.result_preview.replace("\n", " ")
+        flat = s.result_preview.replace("\n", " ")
         short = flat[:60].rstrip() + ("…" if len(flat) > 60 else "")
         if s.status in _ERROR_STATUSES:
             parts.append(f"  [bold red]Error:[/] [dim red]{short}[/]")
@@ -224,14 +225,15 @@ def _message_label(msg: dict) -> str:
 
 def _tool_call_label(tc: dict, result: dict | None) -> str:
     name = tc.get("name", "?")
-    dur  = f"  [dim]{result['duration_ms']}ms[/]" if result else ""
-    err  = "  [red][err][/]" if (result and result.get("error")) else ""
+    dur = f"  [dim]{result['duration_ms']}ms[/]" if result else ""
+    err = "  [red][err][/]" if (result and result.get("error")) else ""
     return f"[magenta][CALL][/] [bold]{name}[/]{dur}{err}"
 
 
 # ---------------------------------------------------------------------------
 # Session panel (left)
 # ---------------------------------------------------------------------------
+
 
 class SessionPanel(Vertical):
     """Left panel — list of root sessions."""
@@ -292,6 +294,7 @@ class SessionPanel(Vertical):
 # ---------------------------------------------------------------------------
 # Tree panel (right)
 # ---------------------------------------------------------------------------
+
 
 class TreePanel(Vertical):
     """Right panel — expandable call tree."""
@@ -410,15 +413,15 @@ class TreePanel(Vertical):
     def _expand_messages(self, node: TreeNode, session_id: str) -> None:
         node.data["loaded"] = True  # type: ignore[index]
 
-        msgs         = load_messages(self._con, session_id)
+        msgs = load_messages(self._con, session_id)
         tool_results = load_tool_results(self._con, session_id)
 
         for msg in msgs:
-            role         = msg["role"]
+            role = msg["role"]
             full_content = msg.get("content") or ""
             msg_data = {
-                "type":        "msg",
-                "role":        role,
+                "type": "msg",
+                "role": role,
                 "full_content": full_content,
                 "token_count": msg.get("token_count") or 0,
             }
@@ -435,11 +438,11 @@ class TreePanel(Vertical):
                     a_node.add_leaf(
                         _tool_call_label(tc, result),
                         data={
-                            "type":       "tool_call",
-                            "name":       tc.get("name", "?"),
-                            "full_args":  tc.get("arguments") or "",
+                            "type": "tool_call",
+                            "name": tc.get("name", "?"),
+                            "full_args": tc.get("arguments") or "",
                             "full_output": (result.get("output") or "") if result else "",
-                            "full_error":  (result.get("error")  or "") if result else "",
+                            "full_error": (result.get("error") or "") if result else "",
                             "duration_ms": result.get("duration_ms") if result else None,
                         },
                     )
@@ -450,6 +453,7 @@ class TreePanel(Vertical):
 # ---------------------------------------------------------------------------
 # Content pane (bottom-right) — full text of highlighted tree node
 # ---------------------------------------------------------------------------
+
 
 class ContentPane(Vertical):
     """Shows full, untruncated content of whichever tree node is highlighted."""
@@ -495,6 +499,7 @@ class ContentPane(Vertical):
 # Main App
 # ---------------------------------------------------------------------------
 
+
 class VizApp(App):
     TITLE = "rojnik · call tree"
     CSS = """
@@ -509,14 +514,14 @@ class VizApp(App):
     }
     """
     BINDINGS = [
-        Binding("q", "quit",    "Quit",    priority=True),
+        Binding("q", "quit", "Quit", priority=True),
         Binding("r", "refresh", "Refresh"),
     ]
 
     def __init__(self, db_path: str, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._db_path = db_path
-        self._con     = db_connect(db_path)
+        self._con = db_connect(db_path)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -568,7 +573,7 @@ class VizApp(App):
         if ntype == "session":
             s: SessionRow = data["row"]
             finished = s.finished_at[11:16] if s.finished_at else None
-            fin_str  = f"  finished {finished}" if finished else "  [yellow](not closed)[/]"
+            fin_str = f"  finished {finished}" if finished else "  [yellow](not closed)[/]"
             parts = [
                 f"[bold]{s.agent_name}[/]  {_status_badge(s.status)}"
                 f"  [dim]{s.total_tokens:,} tok  {s.duration_s}{fin_str}[/]",
@@ -576,8 +581,11 @@ class VizApp(App):
             if s.status in _ERROR_STATUSES:
                 err_text = s.result_preview or "(no detail stored)"
                 parts += ["", "[bold red]── Error ──[/]", f"[red]{err_text}[/]"]
-                parts += ["", "[dim]This run ended with an error and was not resumed.[/]",
-                          "[dim]Any work not yet delegated was skipped.[/]"]
+                parts += [
+                    "",
+                    "[dim]This run ended with an error and was not resumed.[/]",
+                    "[dim]Any work not yet delegated was skipped.[/]",
+                ]
             else:
                 if s.task_preview:
                     parts += ["", "[dim]── Task ──[/]", s.task_preview]
@@ -587,22 +595,22 @@ class VizApp(App):
 
         elif ntype == "text_leaf":
             title = data.get("title", "")
-            text  = data.get("text") or ""
+            text = data.get("text") or ""
             pane.show_text(f"[dim]── {title} ──[/]\n\n{text}")
 
         elif ntype == "msg":
-            role  = data.get("role", "")
+            role = data.get("role", "")
             style, tag = ROLE_STYLE.get(role, ("white", "MSG "))
-            tok   = data.get("token_count") or 0
+            tok = data.get("token_count") or 0
             tok_s = f"  [dim]{tok} tokens[/]" if tok else ""
-            body  = data.get("full_content") or "[dim](no content)[/]"
+            body = data.get("full_content") or "[dim](no content)[/]"
             pane.show_text(f"[{style}][{tag}][/]{tok_s}\n\n{body}")
 
         elif ntype == "tool_call":
-            name     = data.get("name", "?")
-            dur      = data.get("duration_ms")
-            dur_s    = f"  [dim]{dur}ms[/]" if dur is not None else ""
-            parts    = [f"[magenta][CALL][/] [bold]{name}[/]{dur_s}"]
+            name = data.get("name", "?")
+            dur = data.get("duration_ms")
+            dur_s = f"  [dim]{dur}ms[/]" if dur is not None else ""
+            parts = [f"[magenta][CALL][/] [bold]{name}[/]{dur_s}"]
             raw_args = data.get("full_args") or ""
             if raw_args:
                 try:
@@ -636,6 +644,7 @@ class VizApp(App):
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(

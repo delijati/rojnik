@@ -14,7 +14,6 @@ Usage
     result = await registry.dispatch("read_file", '{"path": "/etc/hosts"}')
 """
 
-
 import json
 from collections.abc import Callable
 from typing import Any

@@ -6,7 +6,6 @@ on each iteration. It is NOT persisted directly (the MemoryStore handles
 persistence); it's the working memory for one run.
 """
 
-
 from typing import Literal
 
 from pydantic import BaseModel, Field

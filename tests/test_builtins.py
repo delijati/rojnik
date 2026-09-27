@@ -1,13 +1,12 @@
 """Tests for tools/builtins/ — read_file, list_directory, shell_exec."""
 
-
-
 from rojnik.tools.builtins.files import list_directory, read_file
 from rojnik.tools.builtins.shell import shell_exec
 
 # ---------------------------------------------------------------------------
 # read_file
 # ---------------------------------------------------------------------------
+
 
 class TestReadFile:
     async def test_reads_existing_file(self, tmp_path):
@@ -41,6 +40,7 @@ class TestReadFile:
 # ---------------------------------------------------------------------------
 # list_directory
 # ---------------------------------------------------------------------------
+
 
 class TestListDirectory:
     async def test_lists_files_and_dirs(self, tmp_path):
@@ -88,6 +88,7 @@ class TestListDirectory:
 # shell_exec
 # ---------------------------------------------------------------------------
 
+
 class TestShellExec:
     async def test_runs_simple_command(self):
         result = await shell_exec(command="echo hello")
@@ -106,9 +107,7 @@ class TestShellExec:
         assert str(tmp_path) in result
 
     async def test_missing_workdir_returns_error(self, tmp_path):
-        result = await shell_exec(
-            command="echo hi", workdir=str(tmp_path / "no_such_dir")
-        )
+        result = await shell_exec(command="echo hi", workdir=str(tmp_path / "no_such_dir"))
         assert result.startswith("ERROR:")
 
     async def test_timeout_kills_process(self):

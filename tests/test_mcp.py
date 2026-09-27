@@ -43,6 +43,7 @@ _SERVER = str(Path(__file__).parent.parent / "examples" / "mcp_server.py")
 # test function, avoiding cross-task cancel-scope teardown errors.
 # ---------------------------------------------------------------------------
 
+
 @asynccontextmanager
 async def _connect():
     # stdio_client only inherits a safe env-var whitelist; PYTHONPATH is not
@@ -61,6 +62,7 @@ async def _connect():
 # ---------------------------------------------------------------------------
 # 1. Tool listing
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_list_tools_returns_expected_names():
@@ -117,6 +119,7 @@ async def test_get_time_contains_utc_offset():
 # 3. roll_dice — happy paths
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_roll_dice_single_die():
     async with _connect() as session:
@@ -152,6 +155,7 @@ async def test_roll_dice_total_is_sum():
 # 4. roll_dice — error paths
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_roll_dice_sides_below_2_is_error():
     async with _connect() as session:
@@ -173,6 +177,7 @@ async def test_roll_dice_count_over_100_is_error():
 # ---------------------------------------------------------------------------
 # 5 & 6. MCP bridge (using the inlined helpers above)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_bridge_creates_branded_callables():

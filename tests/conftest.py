@@ -10,7 +10,6 @@ Key concerns
 - MockLLMClient lets us script exact LLM responses without hitting any API.
 """
 
-
 import os
 
 import pytest
@@ -24,6 +23,7 @@ from rojnik.memory.store import MemoryStore
 # ---------------------------------------------------------------------------
 # Singleton reset — runs around EVERY test automatically
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 async def reset_singletons():
@@ -43,6 +43,7 @@ async def reset_singletons():
 # Fresh SQLite store per test (backed by a temp file)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 async def store(tmp_path):
     db_file = tmp_path / "test.db"
@@ -52,6 +53,7 @@ async def store(tmp_path):
 # ---------------------------------------------------------------------------
 # Mock LLM client
 # ---------------------------------------------------------------------------
+
 
 class MockLLMClient:
     """
@@ -71,11 +73,13 @@ class MockLLMClient:
         self.calls: list[dict] = []
 
     async def chat(self, messages, tools=None, *, on_chunk=None, response_format=None):
-        self.calls.append({
-            "messages": list(messages),
-            "tools": tools,
-            "response_format": response_format,
-        })
+        self.calls.append(
+            {
+                "messages": list(messages),
+                "tools": tools,
+                "response_format": response_format,
+            }
+        )
         if not self._responses:
             raise RuntimeError("MockLLMClient: no more scripted responses")
         resp = self._responses.pop(0)
@@ -89,6 +93,7 @@ class MockLLMClient:
 # ---------------------------------------------------------------------------
 # Convenience response builders
 # ---------------------------------------------------------------------------
+
 
 def stop_response(content: str = "All done.", tokens: int = 10) -> LLMResponse:
     return LLMResponse(
@@ -106,10 +111,7 @@ def tool_call_response(
 ) -> LLMResponse:
     return LLMResponse(
         finish_reason="tool_calls",
-        tool_calls=[
-            ToolCallPart(id=cid, name=name, arguments=args)
-            for cid, name, args in calls
-        ],
+        tool_calls=[ToolCallPart(id=cid, name=name, arguments=args) for cid, name, args in calls],
         prompt_tokens=10,
         completion_tokens=5,
         total_tokens=15,

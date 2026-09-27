@@ -1,7 +1,5 @@
 """Tests for memory/store.py — MemoryStore CRUD."""
 
-
-
 from rojnik.llm.schemas import (
     AssistantMessage,
     SystemMessage,
@@ -14,6 +12,7 @@ from rojnik.memory.store import MemoryStore
 # ---------------------------------------------------------------------------
 # Sessions
 # ---------------------------------------------------------------------------
+
 
 class TestSessions:
     async def test_create_session_returns_id(self, store):
@@ -55,6 +54,7 @@ class TestSessions:
 # Messages round-trip
 # ---------------------------------------------------------------------------
 
+
 class TestMessages:
     async def test_add_and_retrieve_user_message(self, store):
         sid = await store.create_session("a")
@@ -88,9 +88,7 @@ class TestMessages:
 
     async def test_tool_result_message_round_trips(self, store):
         sid = await store.create_session("a")
-        await store.add_message(
-            sid, ToolResultMessage(tool_call_id="tc1", content="42")
-        )
+        await store.add_message(sid, ToolResultMessage(tool_call_id="tc1", content="42"))
         msgs = await store.get_messages(sid)
         assert isinstance(msgs[0], ToolResultMessage)
         assert msgs[0].tool_call_id == "tc1"
@@ -118,6 +116,7 @@ class TestMessages:
 # Tool results
 # ---------------------------------------------------------------------------
 
+
 class TestToolResults:
     async def test_save_tool_result_success(self, store):
         from sqlalchemy import select
@@ -134,9 +133,7 @@ class TestToolResults:
             duration_ms=5,
         )
         async with store._session_factory() as db:
-            result = await db.execute(
-                select(ToolResult).where(ToolResult.session_id == sid)
-            )
+            result = await db.execute(select(ToolResult).where(ToolResult.session_id == sid))
             rows = result.scalars().all()
 
         assert len(rows) == 1
@@ -157,9 +154,7 @@ class TestToolResults:
             error="Command timed out",
         )
         async with store._session_factory() as db:
-            result = await db.execute(
-                select(ToolResult).where(ToolResult.session_id == sid)
-            )
+            result = await db.execute(select(ToolResult).where(ToolResult.session_id == sid))
             row = result.scalars().first()
 
         assert row.error == "Command timed out"
@@ -169,6 +164,7 @@ class TestToolResults:
 # ---------------------------------------------------------------------------
 # Singleton behaviour
 # ---------------------------------------------------------------------------
+
 
 class TestSingleton:
     async def test_two_gets_return_same_instance(self, tmp_path):

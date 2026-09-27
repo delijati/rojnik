@@ -1,6 +1,5 @@
 """Tests for tools/registry.py — ToolRegistry."""
 
-
 import json
 
 import pytest
@@ -13,6 +12,7 @@ from rojnik.tools.registry import ToolRegistry
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def registry():
     return ToolRegistry()
@@ -23,6 +23,7 @@ def add_tool():
     @tool(description="Add two integers")
     async def add(a: int, b: int) -> int:
         return a + b
+
     return add
 
 
@@ -31,12 +32,14 @@ def echo_tool():
     @tool(description="Echo a string")
     async def echo(msg: str) -> str:
         return msg
+
     return echo
 
 
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
+
 
 class TestRegistration:
     def test_register_adds_tool(self, registry, add_tool):
@@ -55,6 +58,7 @@ class TestRegistration:
     def test_register_non_tool_raises_typeerror(self, registry):
         async def plain():
             pass
+
         with pytest.raises(TypeError, match="not a @tool-decorated"):
             registry.register(plain)
 
@@ -69,6 +73,7 @@ class TestRegistration:
 # ---------------------------------------------------------------------------
 # Dispatch — success paths
 # ---------------------------------------------------------------------------
+
 
 class TestDispatch:
     async def test_dispatch_async_tool(self, registry, add_tool):
@@ -109,6 +114,7 @@ class TestDispatch:
 # ---------------------------------------------------------------------------
 # Dispatch — error paths
 # ---------------------------------------------------------------------------
+
 
 class TestDispatchErrors:
     async def test_tool_not_found_returns_error_with_available_names(self, registry, add_tool):

@@ -14,7 +14,6 @@ Usage
     await store.close_session(session_id, status="completed", result="Done")
 """
 
-
 import json
 import uuid
 from datetime import UTC, datetime
@@ -163,9 +162,7 @@ class MemoryStore:
                     assert isinstance(msg, AssistantMessage)
                     content = msg.content
                     if msg.tool_calls:
-                        tool_calls_json = json.dumps(
-                            [tc.model_dump() for tc in msg.tool_calls]
-                        )
+                        tool_calls_json = json.dumps([tc.model_dump() for tc in msg.tool_calls])
                 elif role == "tool":
                     assert isinstance(msg, ToolResultMessage)
                     content = msg.content
@@ -189,9 +186,7 @@ class MemoryStore:
         """Return all messages for a session, reconstructed as Message objects."""
         async with self._session_factory() as db:
             result = await db.execute(
-                select(DBMessage)
-                .where(DBMessage.session_id == session_id)
-                .order_by(DBMessage.seq)
+                select(DBMessage).where(DBMessage.session_id == session_id).order_by(DBMessage.seq)
             )
             rows = result.scalars().all()
 
@@ -206,9 +201,7 @@ class MemoryStore:
                 if row.tool_calls_json:
                     for tc_dict in json.loads(row.tool_calls_json):
                         tool_calls.append(ToolCallPart(**tc_dict))
-                messages.append(
-                    AssistantMessage(content=row.content, tool_calls=tool_calls)
-                )
+                messages.append(AssistantMessage(content=row.content, tool_calls=tool_calls))
             elif row.role == "tool":
                 messages.append(
                     ToolResultMessage(

@@ -91,10 +91,12 @@ class TestAgentSkills:
         assert messages[0] == system
 
     async def test_on_demand_adds_catalog_and_tool(self, store, tmp_path):
-        llm = MockLLMClient([
-            tool_call_response([("call-1", "load_skill", '{"name":"testing"}')]),
-            stop_response("done"),
-        ])
+        llm = MockLLMClient(
+            [
+                tool_call_response([("call-1", "load_skill", '{"name":"testing"}')]),
+                stop_response("done"),
+            ]
+        )
         agent = Agent(
             name="tester",
             system_prompt="Base prompt.",
