@@ -31,13 +31,54 @@ from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitErr
 from rojnik.config import settings
 from rojnik.llm.schemas import (
     AssistantMessage,
+    ImagePart,
     LLMResponse,
     Message,
     ResponseFormat,
+    TextPart,
     ToolCallPart,
     ToolSchema,
+    UserMessage,
     normalize_response_format,
 )
+
+
+class LLMError(RuntimeError):
+    """Provider error surfaced by rojnik — callers never see SDK exception types.
+
+    ``status`` is the HTTP status (``None`` for connection failures or
+    exhausted retries), ``model`` the requested model.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None, model: str = "") -> None:
+        super().__init__(message)
+        self.message = message
+        self.status = status
+        self.model = model
+
+
+def _status_error(exc: APIStatusError, model: str, what: str) -> LLMError:
+    body = getattr(exc, "message", None) or str(exc)
+    return LLMError(
+        f"{what} {exc.status_code} (model={model}): {str(body)[:500]}",
+        status=exc.status_code,
+        model=model,
+    )
+
+
+def _user_content(msg: UserMessage) -> str | list[dict[str, Any]]:
+    """Plain text stays a string; multimodal content becomes OpenAI content parts."""
+    if isinstance(msg.content, str):
+        return msg.content
+    parts: list[dict[str, Any]] = []
+    for part in msg.content:
+        if isinstance(part, TextPart):
+            parts.append({"type": "text", "text": part.text})
+        elif isinstance(part, ImagePart):
+            parts.append(
+                {"type": "image_url", "image_url": {"url": part.data_url(), "detail": part.detail}}
+            )
+    return parts
 
 
 def _messages_to_openai(messages: list[Message]) -> list[dict[str, Any]]:
@@ -45,8 +86,11 @@ def _messages_to_openai(messages: list[Message]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for msg in messages:
         role = msg.role
-        if role in ("system", "user"):
+        if role == "system":
             result.append({"role": role, "content": msg.content})  # type: ignore[union-attr]
+        elif role == "user":
+            assert isinstance(msg, UserMessage)
+            result.append({"role": "user", "content": _user_content(msg)})
         elif role == "assistant":
             assert isinstance(msg, AssistantMessage)
             entry: dict[str, Any] = {"role": "assistant"}
@@ -96,6 +140,8 @@ class LLMClient:
         Number of retry attempts on transient errors.
     retry_wait_seconds:
         Base wait time (doubled on each successive attempt).
+    timeout:
+        Request timeout in seconds (provider SDK default when ``None``).
     """
 
     def __init__(
@@ -106,6 +152,7 @@ class LLMClient:
         max_tokens: int | None = None,
         max_retries: int | None = None,
         retry_wait_seconds: float | None = None,
+        timeout: float | None = None,
     ) -> None:
         self._model = model or settings.model
         self._max_tokens = max_tokens or settings.max_tokens
@@ -124,6 +171,8 @@ class LLMClient:
         client_kwargs: dict[str, Any] = {"api_key": resolved_api_key}
         if resolved_base_url:
             client_kwargs["base_url"] = resolved_base_url
+        if timeout is not None:
+            client_kwargs["timeout"] = timeout
 
         self._client = AsyncOpenAI(**client_kwargs)
 
@@ -292,10 +341,65 @@ class LLMClient:
                     await asyncio.sleep(wait)
                 else:
                     logger.error("llm.client_error", status=exc.status_code, body=exc.body)
-                    raise
+                    raise _status_error(exc, self._model, "LLM") from exc
 
         logger.error("llm.max_retries_exceeded", max_retries=self._max_retries)
-        raise RuntimeError(f"LLM call failed after {self._max_retries} retries") from last_error
+        status = last_error.status_code if isinstance(last_error, APIStatusError) else None
+        raise LLMError(
+            f"LLM call failed after {self._max_retries} retries: {last_error}",
+            status=status,
+            model=self._model,
+        ) from last_error
+
+    # ------------------------------------------------------------------
+    # Public: speech-to-text
+    # ------------------------------------------------------------------
+
+    async def transcribe(
+        self,
+        audio: bytes,
+        *,
+        filename: str = "audio.webm",
+        content_type: str = "audio/webm",
+        language: str | None = None,
+        model: str | None = None,
+    ) -> str:
+        """Transcribe audio via an OpenAI-compatible ``/audio/transcriptions`` endpoint.
+
+        Same retry policy as :meth:`chat` (rate limits, connection errors, 5xx).
+        Returns the plain transcript text.
+        """
+        model_name = model or self._model
+        safe_name = filename.replace("\\", "/").rsplit("/", 1)[-1] or "audio.webm"
+        last_error: Exception | None = None
+        for attempt in range(1, self._max_retries + 2):
+            try:
+                kwargs: dict[str, Any] = {
+                    "model": model_name,
+                    "file": (safe_name, audio, content_type),
+                    "response_format": "text",
+                }
+                if language:
+                    kwargs["language"] = language
+                response = await self._client.audio.transcriptions.create(**kwargs)
+                text = response if isinstance(response, str) else getattr(response, "text", "")
+                logger.debug("llm.transcribe", model=model_name, attempt=attempt)
+                return str(text).strip()
+            except (RateLimitError, APIConnectionError) as exc:
+                last_error = exc
+            except APIStatusError as exc:
+                if exc.status_code < 500:
+                    raise _status_error(exc, model_name, "ASR") from exc
+                last_error = exc
+            wait = self._retry_wait * (2 ** (attempt - 1))
+            logger.warning("llm.transcribe — retrying", attempt=attempt, wait_s=wait)
+            await asyncio.sleep(wait)
+        status = last_error.status_code if isinstance(last_error, APIStatusError) else None
+        raise LLMError(
+            f"ASR failed after {self._max_retries} retries: {last_error}",
+            status=status,
+            model=model_name,
+        ) from last_error
 
     # ------------------------------------------------------------------
     # Private: streaming mode (single attempt, no mid-stream retry)
@@ -334,7 +438,12 @@ class LLMClient:
         # Tool-call accumulation: delta index → {id, name, argument chunks}
         tc_accum: dict[int, dict[str, Any]] = {}
 
-        stream = await self._client.chat.completions.create(**kwargs)
+        try:
+            stream = await self._client.chat.completions.create(**kwargs)
+        except APIStatusError as exc:
+            raise _status_error(exc, self._model, "LLM") from exc
+        except APIConnectionError as exc:
+            raise LLMError(f"LLM connection failed: {exc}", model=self._model) from exc
         async for chunk in stream:
             # Usage arrives in the final synthetic chunk when stream_options is set
             if chunk.usage:

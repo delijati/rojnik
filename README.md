@@ -16,6 +16,8 @@ A small async Python harness for building tool-using and multi-agent LLM applica
 - SQLite persistence for messages, tool results, and execution trees
 - Token-budget context trimming that preserves complete tool-call groups
 - Streaming callbacks and Pydantic structured-output schemas
+- Multimodal user messages (`TextPart` / `ImagePart`) and speech-to-text via `LLMClient.transcribe`
+- Provider-neutral errors (`LLMError`) — callers never import the provider SDK
 - Explicit `SKILL.md` support with eager and on-demand loading
 - Optional Model Context Protocol bridge
 
@@ -239,6 +241,32 @@ result = await agent.run(
 ```
 
 `result` remains the provider's final text, typically JSON when a structured response format is used.
+
+## Images And Audio
+
+`LLMClient` is the single model gateway, so applications never need the provider SDK:
+
+```python
+from rojnik.llm import ImagePart, LLMClient, LLMError, SystemMessage, TextPart, UserMessage
+
+client = LLMClient(model="gpt-4o", timeout=60)
+reply = await client.chat(
+    [
+        SystemMessage(content="Read the document faithfully."),
+        UserMessage(content=[ImagePart(data=png_bytes, media_type="image/png", detail="high"),
+                             TextPart(text="Extract all values.")]),
+    ],
+    response_format={"type": "json_schema", "json_schema": {"name": "doc", "strict": True,
+                                                            "schema": schema}},
+)
+
+text = await client.transcribe(audio_bytes, filename="note.webm",
+                               content_type="audio/webm", language="de", model="whisper-1")
+```
+
+Images are converted to OpenAI `image_url` data URLs; memory and token counting use
+`UserMessage.text` (images omitted). Client errors (4xx) and exhausted retries raise
+`LLMError` with `status` and `model`.
 
 ## MCP
 

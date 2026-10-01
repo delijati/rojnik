@@ -44,7 +44,9 @@ def _message_token_count(msg: Message, encoder: tiktoken.Encoding) -> int:
     """Estimate the token cost of a single message (content + overhead)."""
     overhead = 4  # per-message overhead in OpenAI's token counting
     content = ""
-    if hasattr(msg, "content") and msg.content:
+    if isinstance(msg, UserMessage):
+        content += msg.text
+    elif hasattr(msg, "content") and msg.content:
         content += msg.content
     if hasattr(msg, "tool_calls") and msg.tool_calls:
         for tc in msg.tool_calls:

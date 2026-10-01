@@ -5,6 +5,7 @@ These are the canonical types passed around the harness. The LLMClient
 converts between these and the raw openai SDK types internally.
 """
 
+import base64
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -19,9 +20,45 @@ class SystemMessage(BaseModel):
     content: str
 
 
+class TextPart(BaseModel):
+    """Plain text segment of a multimodal user message."""
+
+    type: Literal["text"] = "text"
+    text: str
+
+
+class ImagePart(BaseModel):
+    """Inline image segment of a multimodal user message.
+
+    The raw bytes stay in the model; conversion to the provider's wire format
+    (an OpenAI ``image_url`` data URL) happens in the client.
+    """
+
+    type: Literal["image"] = "image"
+    data: bytes
+    media_type: str = "image/jpeg"
+    detail: Literal["auto", "low", "high"] = "auto"
+
+    def data_url(self) -> str:
+        media_type = self.media_type.split(";")[0].strip()
+        if not media_type.startswith("image/"):
+            media_type = "image/jpeg"
+        return f"data:{media_type};base64,{base64.b64encode(self.data).decode()}"
+
+
+ContentPart = TextPart | ImagePart
+
+
 class UserMessage(BaseModel):
     role: Literal["user"] = "user"
-    content: str
+    content: str | list[ContentPart]
+
+    @property
+    def text(self) -> str:
+        """Text-only view (images omitted) for logging, memory and token counting."""
+        if isinstance(self.content, str):
+            return self.content
+        return "\n".join(part.text for part in self.content if isinstance(part, TextPart))
 
 
 class ToolCallPart(BaseModel):

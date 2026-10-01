@@ -156,8 +156,11 @@ class MemoryStore:
                 tool_calls_json: str | None = None
                 tool_call_id: str | None = None
 
-                if role in ("system", "user"):
+                if role == "system":
                     content = msg.content  # type: ignore[union-attr]
+                elif role == "user":
+                    assert isinstance(msg, UserMessage)
+                    content = msg.text
                 elif role == "assistant":
                     assert isinstance(msg, AssistantMessage)
                     content = msg.content

@@ -1,9 +1,12 @@
-from rojnik.llm.client import LLMClient
+from rojnik.llm.client import LLMClient, LLMError
 from rojnik.llm.schemas import (
     AssistantMessage,
+    ContentPart,
+    ImagePart,
     LLMResponse,
     Message,
     SystemMessage,
+    TextPart,
     ToolCallPart,
     ToolFunctionSchema,
     ToolParameterSchema,
@@ -14,6 +17,10 @@ from rojnik.llm.schemas import (
 
 __all__ = [
     "LLMClient",
+    "LLMError",
+    "ContentPart",
+    "ImagePart",
+    "TextPart",
     "AssistantMessage",
     "LLMResponse",
     "Message",
