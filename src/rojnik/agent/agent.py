@@ -85,6 +85,12 @@ class Agent:
     skill_mode:
         ``"eager"`` includes full instructions in the system prompt.
         ``"on_demand"`` advertises the catalog and adds ``load_skill``.
+    keep_session:
+        ``True`` (default) keeps each run's session, messages and tool results
+        in the MemoryStore for traceability.  ``False`` makes runs ephemeral:
+        the store is still the working memory during the run, but the session
+        is deleted once the run ends (completed, error or cancelled), so hosts
+        that persist conversations themselves keep no second copy.
     """
 
     def __init__(
@@ -100,12 +106,14 @@ class Agent:
         max_skill_bytes: int = DEFAULT_MAX_SKILL_BYTES,
         max_total_skill_bytes: int = DEFAULT_MAX_TOTAL_SKILL_BYTES,
         max_skills: int = DEFAULT_MAX_SKILLS,
+        keep_session: bool = True,
     ) -> None:
         if skill_mode not in ("eager", "on_demand"):
             raise ValueError("skill_mode must be 'eager' or 'on_demand'")
         self.name = name
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
+        self.keep_session = keep_session
         self._on_tool_call = on_tool_call
         self.skills = load_skills(
             skills or (),
@@ -229,6 +237,9 @@ class Agent:
                     total_tokens=state.total_tokens,
                 )
             raise
+        finally:
+            if not self.keep_session:
+                await self._discard_session(store, session_id)
 
         logger.info(
             "agent.run.done",
@@ -237,6 +248,15 @@ class Agent:
             total_tokens=state.total_tokens,
         )
         return result
+
+    @staticmethod
+    async def _discard_session(store: MemoryStore, session_id: str) -> None:
+        try:
+            await store.delete_session(session_id)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "agent.session.discard_failed", session_id=session_id
+            )
 
     def as_tool(
         self,

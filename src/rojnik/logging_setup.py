@@ -1,9 +1,11 @@
 """
 Loguru logging configuration.
 
-Two sinks:
-  - Console: human-readable, coloured, INFO and above.
-  - File:    newline-delimited JSON, DEBUG and above. Rotates at 50 MB.
+Sinks:
+  - Console: human-readable, coloured, ``log_level`` and above (always).
+  - File:    newline-delimited JSON, DEBUG and above, rotates at 50 MB.  Opt-in:
+             only configured when ``log_file`` (``AGENT_LOG_FILE``) is non-empty,
+             and opened lazily on the first record, never at import time.
 
 Call setup_logging() once at process start (done automatically on first import
 of rojnik).  All other modules just do:
@@ -13,13 +15,8 @@ of rojnik).  All other modules just do:
 """
 
 import sys
-from typing import TYPE_CHECKING
 
 from loguru import logger
-
-if TYPE_CHECKING:
-    pass
-
 
 _CONSOLE_FORMAT = (
     "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
@@ -39,8 +36,12 @@ def _format_extra(record: dict) -> str:
     return f"  [{pairs}]"
 
 
-def setup_logging(log_level: str = "INFO", log_file: str = "agent.log") -> None:
-    """Configure loguru sinks.  Safe to call multiple times (idempotent)."""
+def setup_logging(log_level: str = "INFO", log_file: str | None = None) -> None:
+    """Configure loguru sinks.  Safe to call multiple times (idempotent).
+
+    Without ``log_file`` only the console sink is configured, so importing rojnik
+    never creates files (e.g. in a read-only working directory).
+    """
     logger.remove()  # remove default stderr sink
 
     # --- Console sink ---
@@ -53,7 +54,12 @@ def setup_logging(log_level: str = "INFO", log_file: str = "agent.log") -> None:
         diagnose=False,
     )
 
-    # --- JSON file sink ---
+    logger.debug("Logging initialised", log_level=log_level, log_file=log_file or None)
+
+    if not log_file:
+        return
+
+    # --- JSON file sink (opt-in, opened on the first record) ---
     logger.add(
         log_file,
         level="DEBUG",
@@ -61,8 +67,7 @@ def setup_logging(log_level: str = "INFO", log_file: str = "agent.log") -> None:
         rotation="50 MB",
         retention="14 days",
         compression="gz",
+        delay=True,
         backtrace=True,
         diagnose=False,  # don't embed local vars in prod log file
     )
-
-    logger.debug("Logging initialised", log_level=log_level, log_file=log_file)

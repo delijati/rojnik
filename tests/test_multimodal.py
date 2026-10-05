@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from openai import APIConnectionError, APIStatusError
+from openai import APIConnectionError, APIStatusError, BadRequestError
 
 from rojnik.llm import ImagePart, LLMClient, LLMError, SystemMessage, TextPart, UserMessage
 from rojnik.llm.client import _messages_to_openai
@@ -20,12 +20,13 @@ def _completion(content: str = "{}") -> SimpleNamespace:
     )
 
 
-def _status_error(status: int) -> APIStatusError:
+def _status_error(status: int, detail: str = "nope") -> APIStatusError:
     # Built without the SDK's HTTP layer (its transport package differs between versions).
-    error = APIStatusError.__new__(APIStatusError)
+    cls = BadRequestError if status == 400 else APIStatusError
+    error = cls.__new__(cls)
     error.status_code = status
-    error.message = "nope"
-    error.body = {"error": "nope"}
+    error.body = {"detail": detail}
+    error.message = f"Error code: {status} - {error.body}"
     return error
 
 
@@ -113,6 +114,62 @@ async def test_chat_with_image_and_structured_output() -> None:
     assert response.total_tokens == 5
 
 
+async def test_ocr_posts_image_and_annotation_and_retries_transient_failure() -> None:
+    client = _client()
+    transport = _Completions([_status_error(503), {"pages": [], "document_annotation": "{}"}])
+
+    async def post(path: str, **kwargs: Any) -> Any:
+        assert path == "/ocr"
+        return await transport.create(**kwargs)
+
+    client._client.post = post  # noqa: SLF001
+    result = await client.ocr(
+        ImagePart(data=b"img", media_type="image/png"), schema={}, prompt="OCR"
+    )
+    assert len(transport.calls) == 2
+    body = transport.calls[0]["body"]
+    assert body["model"] == "vision-model"
+    assert body["document"] == {"type": "image_url", "image_url": "data:image/png;base64,aW1n"}
+    assert body["document_annotation_format"]["json_schema"]["schema"] == {}
+    assert body["document_annotation_prompt"] == "OCR"
+    assert result["document_annotation"] == "{}"
+
+
+async def test_ocr_preserves_access_error_without_retry() -> None:
+    client = _client()
+    transport = _Completions([_status_error(403)])
+    client._client.post = lambda path, **kwargs: transport.create(**kwargs)  # noqa: SLF001
+    with pytest.raises(LLMError) as caught:
+        await client.ocr(ImagePart(data=b"img"), schema={}, prompt="OCR")
+    assert caught.value.status == 403
+    assert len(transport.calls) == 1
+
+
+async def test_rejected_json_schema_falls_back_to_schema_in_prompt_once() -> None:
+    rejected = _status_error(400, 'tool_choice: type "tool" and "any" are not supported')
+    client = _client(
+        chat=[rejected, _completion('```json\n{"a": 1}\n```'), _completion('{"a": 2}')]
+    )
+    schema = {"type": "json_schema", "json_schema": {"name": "a", "schema": {"type": "object"}}}
+
+    first = await client.chat(
+        [SystemMessage(content="OCR"), UserMessage(content="x")], response_format=schema
+    )
+    second = await client.chat([UserMessage(content="y")], response_format=schema)
+
+    calls = client._client.chat.completions.calls  # noqa: SLF001
+    assert [("response_format" in call) for call in calls] == [True, False, False]
+    assert calls[1]["messages"][0]["content"].startswith("OCR\n\n")
+    assert '{"type": "object"}' in calls[1]["messages"][0]["content"]
+    assert calls[2]["messages"][0]["role"] == "system"
+    assert (first.content, second.content) == ('{"a": 1}', '{"a": 2}')
+
+    invalid = _client(chat=[_status_error(400, "Invalid schema for response_format 'a'")])
+    with pytest.raises(LLMError):
+        await invalid.chat([UserMessage(content="x")], response_format=schema)
+    assert len(invalid._client.chat.completions.calls) == 1  # noqa: SLF001
+
+
 async def test_client_error_is_raised_as_llm_error_without_retry() -> None:
     client = _client(chat=[_status_error(400)])
 
@@ -132,7 +189,37 @@ async def test_server_errors_retry_then_raise_llm_error() -> None:
         await client.chat([UserMessage(content="x")])
 
     assert caught.value.status == 503
+    assert caught.value.retryable
     assert len(client._client.chat.completions.calls) == 2  # noqa: SLF001
+
+
+async def test_client_errors_are_not_retryable() -> None:
+    client = _client(chat=[_status_error(400)])
+
+    with pytest.raises(LLMError) as caught:
+        await client.chat([UserMessage(content="x")])
+
+    assert not caught.value.retryable
+
+
+async def test_connection_failures_after_retries_are_retryable() -> None:
+    client = _client(chat=[_connection_error()] * 10)
+    client._max_retries = 1  # noqa: SLF001
+
+    with pytest.raises(LLMError) as caught:
+        await client.chat([UserMessage(content="x")])
+
+    assert caught.value.status is None
+    assert caught.value.retryable
+
+
+@pytest.mark.parametrize(
+    ("status", "retryable"),
+    [(None, True), (408, True), (409, True), (429, True), (500, True), (503, True)]
+    + [(400, False), (401, False), (403, False), (404, False), (413, False), (422, False)],
+)
+def test_llm_error_marks_transient_failures_retryable(status: int | None, retryable: bool) -> None:
+    assert LLMError("x", status=status).retryable is retryable
 
 
 async def test_transcribe_sends_file_and_language_and_returns_text() -> None:

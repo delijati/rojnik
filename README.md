@@ -133,6 +133,7 @@ Use direct agent tools when the specialist set is stable and you want explicit s
 ```python
 from rojnik import tool
 
+
 @tool(description="Return the sum of two integers")
 async def add(a: int, b: int) -> int:
     return a + b
@@ -220,17 +221,29 @@ Common settings:
 ```bash
 export AGENT_DB_URL=sqlite+aiosqlite:///./agent.db
 export AGENT_LOG_LEVEL=INFO
-export AGENT_LOG_FILE=agent.log
+export AGENT_LOG_FILE=agent.log  # optional; unset or empty = console (stderr) only
 ```
+
+Logging goes to stderr only unless `AGENT_LOG_FILE` is set. The JSON file sink is
+opened lazily on the first record, so importing rojnik never creates files, even in
+a read-only working directory.
+
+Run history is kept in the SQLite store by default. Hosts that persist
+conversations themselves can make runs ephemeral with
+`Agent(..., keep_session=False)`: the store still serves as working memory during
+the run, and the session with its messages and tool results is deleted when the
+run ends (completed, failed or cancelled).
 
 ## Streaming And Structured Output
 
 ```python
 from pydantic import BaseModel
 
+
 class Report(BaseModel):
     summary: str
     files_checked: int
+
 
 chunks: list[str] = []
 result = await agent.run(
@@ -253,15 +266,22 @@ client = LLMClient(model="gpt-4o", timeout=60)
 reply = await client.chat(
     [
         SystemMessage(content="Read the document faithfully."),
-        UserMessage(content=[ImagePart(data=png_bytes, media_type="image/png", detail="high"),
-                             TextPart(text="Extract all values.")]),
+        UserMessage(
+            content=[
+                ImagePart(data=png_bytes, media_type="image/png", detail="high"),
+                TextPart(text="Extract all values."),
+            ]
+        ),
     ],
-    response_format={"type": "json_schema", "json_schema": {"name": "doc", "strict": True,
-                                                            "schema": schema}},
+    response_format={
+        "type": "json_schema",
+        "json_schema": {"name": "doc", "strict": True, "schema": schema},
+    },
 )
 
-text = await client.transcribe(audio_bytes, filename="note.webm",
-                               content_type="audio/webm", language="de", model="whisper-1")
+text = await client.transcribe(
+    audio_bytes, filename="note.webm", content_type="audio/webm", language="de", model="whisper-1"
+)
 ```
 
 Images are converted to OpenAI `image_url` data URLs; memory and token counting use

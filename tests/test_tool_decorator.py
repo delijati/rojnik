@@ -1,8 +1,15 @@
 """Tests for tools/base.py — the @tool decorator."""
 
-import pytest
+import inspect
+import json
+from typing import Any
 
+import pytest
+from pydantic import Field
+
+from rojnik.llm.schemas import ToolCallPart
 from rojnik.tools.base import tool
+from rojnik.tools.registry import ToolRegistry
 
 
 class TestSchemaGeneration:
@@ -134,3 +141,56 @@ class TestExecution:
 
         with pytest.raises(ValueError, match="on purpose"):
             await boom()
+
+
+class TestArgumentForwarding:
+    """The wrapper forwards exactly the arguments the model sent."""
+
+    @staticmethod
+    def _kwargs_tool():
+        async def update(**kwargs: Any) -> dict[str, Any]:
+            return kwargs
+
+        update.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+            [
+                inspect.Parameter("item_id", inspect.Parameter.KEYWORD_ONLY),
+                inspect.Parameter("name", inspect.Parameter.KEYWORD_ONLY, default=None),
+                inspect.Parameter("due", inspect.Parameter.KEYWORD_ONLY, default=None),
+            ]
+        )
+        return tool(description="partial update")(update)
+
+    async def test_omitted_optional_arguments_are_not_forwarded(self):
+        update = self._kwargs_tool()
+
+        assert await update(item_id=7, name="Neu") == {"item_id": 7, "name": "Neu"}
+
+    async def test_explicit_null_is_forwarded(self):
+        update = self._kwargs_tool()
+
+        assert await update(item_id=7, due=None) == {"item_id": 7, "due": None}
+
+    async def test_registry_dispatch_forwards_only_sent_arguments(self):
+        registry = ToolRegistry()
+        registry.register(self._kwargs_tool())
+
+        _, result = await registry.dispatch(
+            ToolCallPart(id="c1", name="update", arguments='{"item_id": 7, "name": "Neu"}')
+        )
+
+        assert json.loads(result) == {"item_id": 7, "name": "Neu"}
+
+    async def test_field_default_is_applied_when_omitted(self):
+        @tool(description="limit")
+        async def search(query: str, limit: int = Field(5, description="max hits")) -> str:
+            return f"{query}:{limit}"
+
+        assert await search(query="x") == "x:5"
+        assert await search(query="x", limit=2) == "x:2"
+
+    async def test_sync_tool_receives_only_sent_arguments(self):
+        @tool(description="greet")
+        def greet(name: str, greeting: str = "Hallo") -> str:
+            return f"{greeting}, {name}!"
+
+        assert await greet(name="Welt") == "Hallo, Welt!"

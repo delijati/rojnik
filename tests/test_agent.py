@@ -59,6 +59,88 @@ class TestAgentLifecycle:
         assert session.finished_at is not None
 
 
+class TestAgentEphemeralSessions:
+    @staticmethod
+    async def _trace_rows(store) -> list[str]:
+        from rojnik.memory.models import DBMessage, ToolResult
+
+        async with store._session_factory() as db:
+            sessions = (await db.execute(select(Session.id))).scalars().all()
+            messages = (await db.execute(select(DBMessage.id))).scalars().all()
+            results = (await db.execute(select(ToolResult.id))).scalars().all()
+        return [*sessions, *messages, *results]
+
+    async def test_keep_session_false_discards_completed_run(self, store):
+        @tool(description="Read a tank level.")
+        async def tank_level(tank: str) -> str:
+            return f"{tank}: 4000 l"
+
+        llm = MockLLMClient(
+            [
+                tool_call_response([("tc1", "tank_level", '{"tank": "T-4"}')]),
+                stop_response("T-4 hat 4000 l."),
+            ]
+        )
+        agent = Agent(
+            name="ephemeral",
+            system_prompt="Business snapshot.",
+            tools=[tank_level],
+            llm=llm,
+            keep_session=False,
+        )
+
+        assert await agent.run("Wie voll ist T-4?") == "T-4 hat 4000 l."
+        assert await self._trace_rows(store) == []
+
+    async def test_keep_session_false_discards_failed_run(self, store):
+        agent = Agent(
+            name="ephemeral",
+            system_prompt="Fail during the LLM call.",
+            llm=MockLLMClient([]),
+            keep_session=False,
+        )
+
+        with pytest.raises(RuntimeError, match="no more scripted responses"):
+            await agent.run("fail")
+
+        assert await self._trace_rows(store) == []
+
+    async def test_keep_session_false_discards_cancelled_run(self, store):
+        started = asyncio.Event()
+
+        class BlockingLLM:
+            async def chat(self, *args, **kwargs):
+                started.set()
+                await asyncio.Event().wait()
+
+        agent = Agent(
+            name="ephemeral",
+            system_prompt="Wait forever.",
+            llm=BlockingLLM(),  # type: ignore[arg-type]
+            keep_session=False,
+        )
+        task = asyncio.create_task(agent.run("wait"))
+        await started.wait()
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert await self._trace_rows(store) == []
+
+    async def test_sessions_are_kept_by_default(self, store):
+        agent = Agent(
+            name="kept",
+            system_prompt="Keep the trace.",
+            llm=MockLLMClient([stop_response("done")]),
+        )
+
+        await agent.run("keep")
+
+        session = await _only_session(store)
+        assert session.status == "completed"
+
+
 class TestAgentSkills:
     @staticmethod
     def _skill(tmp_path, *, name="testing"):

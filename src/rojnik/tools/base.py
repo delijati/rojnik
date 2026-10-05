@@ -21,6 +21,9 @@ What the decorator does
 3. Derives an OpenAI-compatible JSON Schema from that model.
 4. Wraps the function so that:
    - inputs are validated with Pydantic before calling the real function.
+   - only the arguments the caller (the model) actually sent are forwarded;
+     an omitted optional parameter keeps the function's own default instead
+     of arriving as an explicit value (``Field(...)`` defaults are applied).
    - sync functions are dispatched to asyncio's default thread executor
      so the event loop is never blocked.
 5. Attaches `.tool_schema` (a ToolSchema) and `.is_tool = True` to the wrapper.
@@ -162,12 +165,19 @@ def tool(description: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]
         schema = _build_tool_schema(fn, description)
         validator_model = _build_pydantic_validator(fn)
         is_async = _is_coroutine(fn)
+        omittable = frozenset(
+            name
+            for name, param in inspect.signature(fn).parameters.items()
+            if name not in _SKIP_PARAMS
+            and param.default is not inspect.Parameter.empty
+            and not isinstance(param.default, FieldInfo)
+        )
 
         @wraps(fn)
         async def wrapper(**kwargs: Any) -> Any:
-            # Validate inputs
+            # Validate inputs; forward only what was sent (plus Field defaults)
             validated = validator_model(**kwargs)
-            clean_kwargs = validated.model_dump()
+            clean_kwargs = validated.model_dump(exclude=omittable - validated.model_fields_set)
 
             if is_async:
                 return await fn(**clean_kwargs)

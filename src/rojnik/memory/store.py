@@ -12,6 +12,7 @@ Usage
     await store.add_message(session_id, role="user", content="Fix the bug")
     history = await store.get_messages(session_id)
     await store.close_session(session_id, status="completed", result="Done")
+    await store.delete_session(session_id)  # optional: drop the trace again
 """
 
 import json
@@ -20,7 +21,7 @@ from datetime import UTC, datetime
 from typing import Any, Optional
 
 from loguru import logger
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -126,6 +127,20 @@ class MemoryStore:
             status=status,
             total_tokens=total_tokens,
         )
+
+    async def delete_session(self, session_id: str) -> None:
+        """Remove a session with its messages and tool results; child sessions are detached."""
+        async with self._session_factory() as db:
+            async with db.begin():
+                await db.execute(delete(DBMessage).where(DBMessage.session_id == session_id))
+                await db.execute(delete(ToolResult).where(ToolResult.session_id == session_id))
+                await db.execute(
+                    update(Session)
+                    .where(Session.parent_session_id == session_id)
+                    .values(parent_session_id=None)
+                )
+                await db.execute(delete(Session).where(Session.id == session_id))
+        logger.debug("memory.session.deleted", session_id=session_id)
 
     # ------------------------------------------------------------------
     # Messages

@@ -92,7 +92,8 @@ class Settings:
     # Logging                                                              #
     # ------------------------------------------------------------------ #
     log_level: str = field(default_factory=lambda: os.environ.get("AGENT_LOG_LEVEL", "INFO"))
-    log_file: str = field(default_factory=lambda: os.environ.get("AGENT_LOG_FILE", "agent.log"))
+    # Empty (default) = console only; set AGENT_LOG_FILE to opt into a JSON file sink.
+    log_file: str = field(default_factory=lambda: os.environ.get("AGENT_LOG_FILE", ""))
 
     # ------------------------------------------------------------------ #
     # Post-init: validate & fill in per-provider defaults                 #

@@ -21,9 +21,11 @@ caller can create a fully custom client without touching env vars.
 """
 
 import asyncio
+import json
+import re
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeGuard
 
 from loguru import logger
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitError
@@ -42,6 +44,10 @@ from rojnik.llm.schemas import (
     normalize_response_format,
 )
 
+_TRANSIENT_STATUSES = frozenset({408, 409, 429})
+_STRUCTURED_OUTPUT_PARAMS = ("tool_choice", "response_format", "json_schema")
+_FENCE = re.compile(r"\s*```[\w-]*\s*(.*?)\s*```\s*", re.DOTALL)
+
 
 class LLMError(RuntimeError):
     """Provider error surfaced by rojnik — callers never see SDK exception types.
@@ -56,6 +62,12 @@ class LLMError(RuntimeError):
         self.status = status
         self.model = model
 
+    @property
+    def retryable(self) -> bool:
+        """Transient failure worth retrying later: no response (connection, timeout),
+        request timeout, conflict, rate limit or server error — never a rejected request."""
+        return self.status is None or self.status in _TRANSIENT_STATUSES or self.status >= 500
+
 
 def _status_error(exc: APIStatusError, model: str, what: str) -> LLMError:
     body = getattr(exc, "message", None) or str(exc)
@@ -64,6 +76,33 @@ def _status_error(exc: APIStatusError, model: str, what: str) -> LLMError:
         status=exc.status_code,
         model=model,
     )
+
+
+def _is_json_schema(response_format: dict[str, Any] | None) -> TypeGuard[dict[str, Any]]:
+    return response_format is not None and response_format.get("type") == "json_schema"
+
+
+def _rejects_structured_output(exc: APIStatusError) -> bool:
+    text = f"{exc.message} {exc.body}".lower()
+    return (
+        exc.status_code == 400
+        and "support" in text
+        and any(p in text for p in _STRUCTURED_OUTPUT_PARAMS)
+    )
+
+
+def _schema_in_prompt(
+    openai_messages: list[dict[str, Any]], response_format: dict[str, Any]
+) -> list[dict[str, Any]]:
+    schema = json.dumps(response_format["json_schema"].get("schema", {}), ensure_ascii=False)
+    rule = (
+        "Respond with exactly one JSON object that matches this JSON schema, "
+        f"without markdown or any other text:\n{schema}"
+    )
+    if openai_messages and openai_messages[0]["role"] == "system":
+        first, *rest = openai_messages
+        return [{**first, "content": f"{first['content']}\n\n{rule}"}, *rest]
+    return [{"role": "system", "content": rule}, *openai_messages]
 
 
 def _user_content(msg: UserMessage) -> str | list[dict[str, Any]]:
@@ -175,6 +214,9 @@ class LLMClient:
             client_kwargs["timeout"] = timeout
 
         self._client = AsyncOpenAI(**client_kwargs)
+        # ponytail: per-instance memory, so every new client pays one rejected request;
+        # upgrade path: a capability cache shared per (base_url, model).
+        self._schema_in_prompt = False
 
         logger.debug(
             "llm.client.created",
@@ -238,7 +280,21 @@ class LLMClient:
 
         if on_chunk is not None:
             return await self._chat_stream(openai_messages, tools_payload, fmt, on_chunk)
+        if self._schema_in_prompt and _is_json_schema(fmt):
+            return await self._chat_schema_in_prompt(openai_messages, tools_payload, fmt)
         return await self._chat_blocking(openai_messages, tools_payload, fmt)
+
+    async def _chat_schema_in_prompt(
+        self,
+        openai_messages: list[dict[str, Any]],
+        tools_payload: list[dict[str, Any]] | None,
+        response_format: dict[str, Any],
+    ) -> LLMResponse:
+        response = await self._chat_blocking(
+            _schema_in_prompt(openai_messages, response_format), tools_payload, None
+        )
+        fenced = _FENCE.fullmatch(response.content or "")
+        return response.model_copy(update={"content": fenced.group(1)}) if fenced else response
 
     # ------------------------------------------------------------------
     # Private: blocking mode (with retry)
@@ -339,6 +395,12 @@ class LLMClient:
                         wait_s=wait,
                     )
                     await asyncio.sleep(wait)
+                elif _is_json_schema(response_format) and _rejects_structured_output(exc):
+                    self._schema_in_prompt = True
+                    logger.info("llm.json_schema_unsupported — schema in prompt", model=self._model)
+                    return await self._chat_schema_in_prompt(
+                        openai_messages, tools_payload, response_format
+                    )
                 else:
                     logger.error("llm.client_error", status=exc.status_code, body=exc.body)
                     raise _status_error(exc, self._model, "LLM") from exc
@@ -399,6 +461,46 @@ class LLMClient:
             f"ASR failed after {self._max_retries} retries: {last_error}",
             status=status,
             model=model_name,
+        ) from last_error
+
+    async def ocr(
+        self,
+        image: ImagePart,
+        *,
+        schema: dict[str, Any],
+        prompt: str,
+    ) -> dict[str, Any]:
+        """Mistral OCR with document annotations; one document read, no chat fallback."""
+        body = {
+            "model": self._model,
+            "document": {"type": "image_url", "image_url": image.data_url()},
+            "include_image_base64": False,
+            "document_annotation_format": {
+                "type": "json_schema",
+                "json_schema": {"name": "observed_document", "strict": True, "schema": schema},
+            },
+            "document_annotation_prompt": prompt,
+        }
+        last_error: Exception | None = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                response = await self._client.post("/ocr", body=body, cast_to=dict)
+                if not isinstance(response, dict):
+                    raise LLMError("OCR response must be an object", model=self._model)
+                return response
+            except (RateLimitError, APIConnectionError) as exc:
+                last_error = exc
+            except APIStatusError as exc:
+                if exc.status_code < 500:
+                    raise _status_error(exc, self._model, "OCR") from exc
+                last_error = exc
+            if attempt < self._max_retries:
+                await asyncio.sleep(self._retry_wait * (2**attempt))
+        status = last_error.status_code if isinstance(last_error, APIStatusError) else None
+        raise LLMError(
+            f"OCR failed after {self._max_retries} retries: {last_error}",
+            status=status,
+            model=self._model,
         ) from last_error
 
     # ------------------------------------------------------------------

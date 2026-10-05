@@ -49,6 +49,30 @@ class TestSessions:
 
         assert "42" in row.result_preview
 
+    async def test_delete_session_removes_trace_and_detaches_children(self, store):
+        from sqlalchemy import select
+
+        from rojnik.memory.models import DBMessage, Session, ToolResult
+
+        parent = await store.create_session("parent", task="Betriebsdaten")
+        child = await store.create_session("child", parent_session_id=parent)
+        other = await store.create_session("other", task="bleibt")
+        for sid in (parent, other):
+            await store.add_message(sid, UserMessage(content="Tank T-4"))
+            await store.save_tool_result(sid, "tc", "lookup", input_json="{}", output="T-4")
+
+        await store.delete_session(parent)
+
+        async with store._session_factory() as db:
+            sessions = {row.id: row for row in (await db.execute(select(Session))).scalars()}
+            message_owners = (await db.execute(select(DBMessage.session_id))).scalars().all()
+            result_owners = (await db.execute(select(ToolResult.session_id))).scalars().all()
+
+        assert set(sessions) == {child, other}
+        assert sessions[child].parent_session_id is None
+        assert message_owners == [other]
+        assert result_owners == [other]
+
 
 # ---------------------------------------------------------------------------
 # Messages round-trip
