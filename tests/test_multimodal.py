@@ -114,6 +114,18 @@ async def test_chat_with_image_and_structured_output() -> None:
     assert response.total_tokens == 5
 
 
+async def test_content_blocks_keep_only_text_and_drop_thinking() -> None:
+    blocks = [
+        {"type": "thinking", "thinking": "hmm", "signature": "x"},
+        {"type": "text", "text": '{"entries":[]}'},
+    ]
+    client = _client(chat=[_completion(blocks)])  # type: ignore[arg-type]
+
+    response = await client.chat([UserMessage(content="x")])
+
+    assert response.content == '{"entries":[]}'
+
+
 async def test_ocr_posts_image_and_annotation_and_retries_transient_failure() -> None:
     client = _client()
     transport = _Completions([_status_error(503), {"pages": [], "document_annotation": "{}"}])

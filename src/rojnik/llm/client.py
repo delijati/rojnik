@@ -105,6 +105,16 @@ def _schema_in_prompt(
     return [{"role": "system", "content": rule}, *openai_messages]
 
 
+def _text_content(content: Any) -> str | None:
+    """Some OpenAI-compatible servers return content blocks; keep only the text blocks."""
+    if content is None or isinstance(content, str):
+        return content
+    texts = [
+        b.get("text") or "" for b in content if isinstance(b, dict) and b.get("type") == "text"
+    ]
+    return "".join(texts) or None
+
+
 def _user_content(msg: UserMessage) -> str | list[dict[str, Any]]:
     """Plain text stays a string; multimodal content becomes OpenAI content parts."""
     if isinstance(msg.content, str):
@@ -343,7 +353,7 @@ class LLMClient:
 
                 llm_response = LLMResponse(
                     finish_reason=finish_reason,  # type: ignore[arg-type]
-                    content=choice.message.content,
+                    content=_text_content(choice.message.content),
                     tool_calls=tool_calls,
                     prompt_tokens=usage.prompt_tokens if usage else 0,
                     completion_tokens=usage.completion_tokens if usage else 0,
@@ -566,9 +576,10 @@ class LLMClient:
             delta = choice.delta
 
             # Text content
-            if delta.content:
-                content_parts.append(delta.content)
-                on_chunk(delta.content)
+            text = _text_content(delta.content)
+            if text:
+                content_parts.append(text)
+                on_chunk(text)
 
             # Tool-call deltas (indexed; accumulate id, name, argument fragments)
             if delta.tool_calls:
