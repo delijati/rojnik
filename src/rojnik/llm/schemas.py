@@ -107,6 +107,8 @@ class LLMResponse(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    # Part of prompt_tokens served from the provider's prompt cache (0 if not reported)
+    cached_tokens: int = 0
 
     # Raw model name echoed back (useful for logging)
     model: str = ""

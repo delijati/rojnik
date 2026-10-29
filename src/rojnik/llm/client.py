@@ -21,9 +21,11 @@ caller can create a fully custom client without touching env vars.
 """
 
 import asyncio
+import inspect
 import json
 import re
 import time
+import weakref
 from collections.abc import Callable
 from typing import Any, TypeGuard
 
@@ -103,6 +105,60 @@ def _schema_in_prompt(
         first, *rest = openai_messages
         return [{**first, "content": f"{first['content']}\n\n{rule}"}, *rest]
     return [{"role": "system", "content": rule}, *openai_messages]
+
+
+def _cached_tokens(usage: Any) -> int:
+    """Prompt tokens the provider served from its prompt cache (0 if not reported).
+
+    OpenAI-compatible servers report ``usage.prompt_tokens_details.cached_tokens``;
+    DeepSeek uses ``prompt_cache_hit_tokens``; some servers put ``cached_tokens`` or
+    ``num_cached_tokens`` directly on ``usage``.
+    """
+    if usage is None:
+        return 0
+    details = getattr(usage, "prompt_tokens_details", None)
+    if isinstance(details, dict):
+        value = details.get("cached_tokens")
+    else:
+        value = getattr(details, "cached_tokens", None)
+    for name in ("prompt_cache_hit_tokens", "cached_tokens", "num_cached_tokens"):
+        if value is None:
+            value = getattr(usage, name, None)
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+# One SDK client (and with it one HTTP connection pool) per event loop and endpoint, so
+# consecutive calls reuse TLS connections instead of opening a new one per LLMClient.
+_Pool = dict[tuple[Any, ...], AsyncOpenAI]
+_SHARED_CLIENTS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _Pool] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _shared_client(kwargs: dict[str, Any]) -> AsyncOpenAI:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return AsyncOpenAI(**kwargs)
+    key = (kwargs.get("api_key"), kwargs.get("base_url"), kwargs.get("timeout"))
+    pool = _SHARED_CLIENTS.setdefault(loop, {})
+    client = pool.get(key)
+    if client is None or client.is_closed():
+        client = pool[key] = AsyncOpenAI(**kwargs)
+    return client
+
+
+async def close_shared_clients() -> None:
+    """Close the shared connection pools of the running event loop (call on shutdown)."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    for client in _SHARED_CLIENTS.pop(loop, {}).values():
+        await client.close()
 
 
 def _text_content(content: Any) -> str | None:
@@ -191,6 +247,10 @@ class LLMClient:
         Base wait time (doubled on each successive attempt).
     timeout:
         Request timeout in seconds (provider SDK default when ``None``).
+    share_connection:
+        Reuse one HTTP connection pool per event loop, endpoint, key and timeout across
+        all ``LLMClient`` instances (default). ``False`` gives this instance its own pool;
+        close it with :meth:`aclose`. Shared pools close with :func:`close_shared_clients`.
     """
 
     def __init__(
@@ -202,6 +262,7 @@ class LLMClient:
         max_retries: int | None = None,
         retry_wait_seconds: float | None = None,
         timeout: float | None = None,
+        share_connection: bool = True,
     ) -> None:
         self._model = model or settings.model
         self._max_tokens = max_tokens or settings.max_tokens
@@ -223,7 +284,10 @@ class LLMClient:
         if timeout is not None:
             client_kwargs["timeout"] = timeout
 
-        self._client = AsyncOpenAI(**client_kwargs)
+        self._client_kwargs = client_kwargs
+        self._share_connection = share_connection
+        self._own_client: AsyncOpenAI | None = None
+        self._client_override: Any = None
         # ponytail: per-instance memory, so every new client pays one rejected request;
         # upgrade path: a capability cache shared per (base_url, model).
         self._schema_in_prompt = False
@@ -234,6 +298,27 @@ class LLMClient:
             provider=settings.provider,
             base_url=resolved_base_url or "https://api.openai.com/v1",
         )
+
+    @property
+    def _client(self) -> Any:
+        """The SDK client: shared per event loop and endpoint unless disabled."""
+        if self._client_override is not None:
+            return self._client_override
+        if self._share_connection:
+            return _shared_client(self._client_kwargs)
+        if self._own_client is None:
+            self._own_client = AsyncOpenAI(**self._client_kwargs)
+        return self._own_client
+
+    @_client.setter
+    def _client(self, value: Any) -> None:
+        self._client_override = value
+
+    async def aclose(self) -> None:
+        """Close this instance's own connection pool (shared pools stay open)."""
+        if self._own_client is not None:
+            await self._own_client.close()
+            self._own_client = None
 
     # ------------------------------------------------------------------
     # Public interface
@@ -358,6 +443,7 @@ class LLMClient:
                     prompt_tokens=usage.prompt_tokens if usage else 0,
                     completion_tokens=usage.completion_tokens if usage else 0,
                     total_tokens=usage.total_tokens if usage else 0,
+                    cached_tokens=_cached_tokens(usage),
                     model=response.model,
                 )
 
@@ -366,6 +452,7 @@ class LLMClient:
                     finish_reason=finish_reason,
                     n_tool_calls=len(tool_calls),
                     prompt_tokens=llm_response.prompt_tokens,
+                    cached_tokens=llm_response.cached_tokens,
                     completion_tokens=llm_response.completion_tokens,
                     latency_ms=latency_ms,
                     attempt=attempt,
@@ -546,6 +633,8 @@ class LLMClient:
         prompt_tokens: int = 0
         completion_tokens: int = 0
         total_tokens: int = 0
+        cached_tokens: int = 0
+        first_token_ms: int | None = None
 
         # Tool-call accumulation: delta index → {id, name, argument chunks}
         tc_accum: dict[int, dict[str, Any]] = {}
@@ -556,44 +645,54 @@ class LLMClient:
             raise _status_error(exc, self._model, "LLM") from exc
         except APIConnectionError as exc:
             raise LLMError(f"LLM connection failed: {exc}", model=self._model) from exc
-        async for chunk in stream:
-            # Usage arrives in the final synthetic chunk when stream_options is set
-            if chunk.usage:
-                prompt_tokens = chunk.usage.prompt_tokens or 0
-                completion_tokens = chunk.usage.completion_tokens or 0
-                total_tokens = chunk.usage.total_tokens or 0
+        # Close the response even when the caller cancels mid-stream, so the
+        # connection returns to the (shared) pool instead of lingering until GC.
+        try:
+            async for chunk in stream:
+                # Usage arrives in the final synthetic chunk when stream_options is set
+                if chunk.usage:
+                    prompt_tokens = chunk.usage.prompt_tokens or 0
+                    completion_tokens = chunk.usage.completion_tokens or 0
+                    total_tokens = chunk.usage.total_tokens or 0
+                    cached_tokens = _cached_tokens(chunk.usage)
 
-            if chunk.model:
-                model_name = chunk.model
+                if chunk.model:
+                    model_name = chunk.model
 
-            if not chunk.choices:
-                continue
+                if not chunk.choices:
+                    continue
 
-            choice = chunk.choices[0]
-            if choice.finish_reason:
-                finish_reason = choice.finish_reason
+                choice = chunk.choices[0]
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
 
-            delta = choice.delta
+                delta = choice.delta
 
-            # Text content
-            text = _text_content(delta.content)
-            if text:
-                content_parts.append(text)
-                on_chunk(text)
+                # Text content
+                text = _text_content(delta.content)
+                if text:
+                    if first_token_ms is None:
+                        first_token_ms = int((time.perf_counter() - t0) * 1000)
+                    content_parts.append(text)
+                    on_chunk(text)
 
-            # Tool-call deltas (indexed; accumulate id, name, argument fragments)
-            if delta.tool_calls:
-                for tc_delta in delta.tool_calls:
-                    idx = tc_delta.index
-                    if idx not in tc_accum:
-                        tc_accum[idx] = {"id": "", "name": "", "arguments": []}
-                    if tc_delta.id:
-                        tc_accum[idx]["id"] = tc_delta.id
-                    if tc_delta.function:
-                        if tc_delta.function.name:
-                            tc_accum[idx]["name"] = tc_delta.function.name
-                        if tc_delta.function.arguments:
-                            tc_accum[idx]["arguments"].append(tc_delta.function.arguments)
+                # Tool-call deltas (indexed; accumulate id, name, argument fragments)
+                if delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in tc_accum:
+                            tc_accum[idx] = {"id": "", "name": "", "arguments": []}
+                        if tc_delta.id:
+                            tc_accum[idx]["id"] = tc_delta.id
+                        if tc_delta.function:
+                            if tc_delta.function.name:
+                                tc_accum[idx]["name"] = tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                tc_accum[idx]["arguments"].append(tc_delta.function.arguments)
+        finally:
+            closed = getattr(stream, "close", lambda: None)()
+            if inspect.isawaitable(closed):
+                await closed
 
         latency_ms = int((time.perf_counter() - t0) * 1000)
 
@@ -616,6 +715,7 @@ class LLMClient:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
+            cached_tokens=cached_tokens,
             model=model_name,
         )
 
@@ -624,8 +724,10 @@ class LLMClient:
             finish_reason=finish_reason,
             n_tool_calls=len(tool_calls),
             prompt_tokens=prompt_tokens,
+            cached_tokens=cached_tokens,
             completion_tokens=completion_tokens,
             latency_ms=latency_ms,
+            first_token_ms=first_token_ms,
             streaming=True,
         )
         return llm_response

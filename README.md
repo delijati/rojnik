@@ -288,6 +288,18 @@ Images are converted to OpenAI `image_url` data URLs; memory and token counting 
 `UserMessage.text` (images omitted). Client errors (4xx) and exhausted retries raise
 `LLMError` with `status` and `model`.
 
+## Connections And Prompt Cache
+
+All `LLMClient` instances with the same endpoint, API key and timeout share one HTTP
+connection pool per event loop, so consecutive calls skip the TLS handshake. Close the
+pools of the running loop on shutdown with `await close_shared_clients()`. Pass
+`share_connection=False` for a private pool and close it with `await client.aclose()`.
+A stream is closed even when the caller aborts it, so its connection returns to the pool.
+
+`LLMResponse.cached_tokens` is the part of `prompt_tokens` the provider served from its
+prompt cache (`prompt_tokens_details.cached_tokens`, DeepSeek `prompt_cache_hit_tokens`);
+it is `0` when the provider does not report it.
+
 ## MCP
 
 Install the optional dependency, then convert a connected MCP session's tools:

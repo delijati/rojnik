@@ -1,4 +1,4 @@
-from rojnik.llm.client import LLMClient, LLMError
+from rojnik.llm.client import LLMClient, LLMError, close_shared_clients
 from rojnik.llm.schemas import (
     AssistantMessage,
     ContentPart,
@@ -18,6 +18,7 @@ from rojnik.llm.schemas import (
 __all__ = [
     "LLMClient",
     "LLMError",
+    "close_shared_clients",
     "ContentPart",
     "ImagePart",
     "TextPart",
