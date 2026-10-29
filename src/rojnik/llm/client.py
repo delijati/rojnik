@@ -161,6 +161,24 @@ async def close_shared_clients() -> None:
         await client.close()
 
 
+# Extra request fields an endpoint rejected, per (base_url, model): sent once, then dropped
+# for every later request of the process (e.g. `prompt_cache_key` on a gateway without it).
+_REJECTED_FIELDS: dict[tuple[str | None, str], set[str]] = {}
+
+
+def _rejected_field(exc: APIStatusError, extra_body: dict[str, Any] | None) -> str | None:
+    """The extra field a 400/422 response complains about, if any."""
+    if not extra_body or exc.status_code not in (400, 422):
+        return None
+    text = f"{getattr(exc, 'message', '')} {getattr(exc, 'body', '')}".lower()
+    return next((name for name in extra_body if name.lower() in text), None)
+
+
+def _without(extra_body: dict[str, Any] | None, field: str) -> dict[str, Any] | None:
+    remaining = {name: value for name, value in (extra_body or {}).items() if name != field}
+    return remaining or None
+
+
 def _text_content(content: Any) -> str | None:
     """Some OpenAI-compatible servers return content blocks; keep only the text blocks."""
     if content is None or isinstance(content, str):
@@ -247,6 +265,10 @@ class LLMClient:
         Base wait time (doubled on each successive attempt).
     timeout:
         Request timeout in seconds (provider SDK default when ``None``).
+    extra_body:
+        Provider-specific request fields sent with every chat call (e.g.
+        ``{"prompt_cache_key": "session-42"}``). A field the endpoint rejects with 400/422
+        is dropped, remembered per endpoint and model, and the request retried once.
     share_connection:
         Reuse one HTTP connection pool per event loop, endpoint, key and timeout across
         all ``LLMClient`` instances (default). ``False`` gives this instance its own pool;
@@ -263,6 +285,7 @@ class LLMClient:
         retry_wait_seconds: float | None = None,
         timeout: float | None = None,
         share_connection: bool = True,
+        extra_body: dict[str, Any] | None = None,
     ) -> None:
         self._model = model or settings.model
         self._max_tokens = max_tokens or settings.max_tokens
@@ -288,6 +311,7 @@ class LLMClient:
         self._share_connection = share_connection
         self._own_client: AsyncOpenAI | None = None
         self._client_override: Any = None
+        self._extra_body = dict(extra_body or {})
         # ponytail: per-instance memory, so every new client pays one rejected request;
         # upgrade path: a capability cache shared per (base_url, model).
         self._schema_in_prompt = False
@@ -331,6 +355,7 @@ class LLMClient:
         *,
         on_chunk: Callable[[str], None] | None = None,
         response_format: ResponseFormat = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request and return a normalised LLMResponse.
@@ -353,6 +378,9 @@ class LLMClient:
                                               (e.g. ``{"type": "json_object"}``).
               - Pydantic ``BaseModel`` subclass – auto-converted to a
                 ``json_schema`` descriptor with ``strict=True``.
+        extra_body:
+            Provider-specific request fields for this call, merged over the client's
+            ``extra_body`` (see the constructor).
 
         Notes
         -----
@@ -373,20 +401,39 @@ class LLMClient:
             streaming=on_chunk is not None,
         )
 
+        extra = self._extra_fields(extra_body)
         if on_chunk is not None:
-            return await self._chat_stream(openai_messages, tools_payload, fmt, on_chunk)
+            return await self._chat_stream(openai_messages, tools_payload, fmt, on_chunk, extra)
         if self._schema_in_prompt and _is_json_schema(fmt):
-            return await self._chat_schema_in_prompt(openai_messages, tools_payload, fmt)
-        return await self._chat_blocking(openai_messages, tools_payload, fmt)
+            return await self._chat_schema_in_prompt(openai_messages, tools_payload, fmt, extra)
+        return await self._chat_blocking(openai_messages, tools_payload, fmt, extra)
+
+    def _endpoint(self) -> tuple[str | None, str]:
+        return (self._client_kwargs.get("base_url"), self._model)
+
+    def _extra_fields(self, extra_body: dict[str, Any] | None) -> dict[str, Any] | None:
+        rejected = _REJECTED_FIELDS.get(self._endpoint(), set())
+        merged = {**self._extra_body, **(extra_body or {})}
+        kept = {name: value for name, value in merged.items() if name not in rejected}
+        return kept or None
+
+    def _note_rejected(self, exc: APIStatusError, extra_body: dict[str, Any] | None) -> str | None:
+        """Name of the extra field the error rejects (remembered for this endpoint)."""
+        field = _rejected_field(exc, extra_body)
+        if field is not None:
+            _REJECTED_FIELDS.setdefault(self._endpoint(), set()).add(field)
+            logger.info("llm.extra_field_rejected — dropped", field=field, model=self._model)
+        return field
 
     async def _chat_schema_in_prompt(
         self,
         openai_messages: list[dict[str, Any]],
         tools_payload: list[dict[str, Any]] | None,
         response_format: dict[str, Any],
+        extra_body: dict[str, Any] | None = None,
     ) -> LLMResponse:
         response = await self._chat_blocking(
-            _schema_in_prompt(openai_messages, response_format), tools_payload, None
+            _schema_in_prompt(openai_messages, response_format), tools_payload, None, extra_body
         )
         fenced = _FENCE.fullmatch(response.content or "")
         return response.model_copy(update={"content": fenced.group(1)}) if fenced else response
@@ -400,6 +447,7 @@ class LLMClient:
         openai_messages: list[dict[str, Any]],
         tools_payload: list[dict[str, Any]] | None,
         response_format: dict[str, Any] | None,
+        extra_body: dict[str, Any] | None = None,
     ) -> LLMResponse:
         last_error: Exception | None = None
         for attempt in range(1, self._max_retries + 2):  # +2 so last attempt is attempt N+1
@@ -415,6 +463,8 @@ class LLMClient:
                     kwargs["tool_choice"] = "auto"
                 if response_format is not None:
                     kwargs["response_format"] = response_format
+                if extra_body:
+                    kwargs["extra_body"] = extra_body
 
                 response = await self._client.chat.completions.create(**kwargs)
 
@@ -492,11 +542,18 @@ class LLMClient:
                         wait_s=wait,
                     )
                     await asyncio.sleep(wait)
+                elif (field := self._note_rejected(exc, extra_body)) is not None:
+                    return await self._chat_blocking(
+                        openai_messages,
+                        tools_payload,
+                        response_format,
+                        _without(extra_body, field),
+                    )
                 elif _is_json_schema(response_format) and _rejects_structured_output(exc):
                     self._schema_in_prompt = True
                     logger.info("llm.json_schema_unsupported — schema in prompt", model=self._model)
                     return await self._chat_schema_in_prompt(
-                        openai_messages, tools_payload, response_format
+                        openai_messages, tools_payload, response_format, extra_body
                     )
                 else:
                     logger.error("llm.client_error", status=exc.status_code, body=exc.body)
@@ -610,6 +667,7 @@ class LLMClient:
         tools_payload: list[dict[str, Any]] | None,
         response_format: dict[str, Any] | None,
         on_chunk: Callable[[str], None],
+        extra_body: dict[str, Any] | None = None,
     ) -> LLMResponse:
         t0 = time.perf_counter()
 
@@ -625,6 +683,8 @@ class LLMClient:
             kwargs["tool_choice"] = "auto"
         if response_format is not None:
             kwargs["response_format"] = response_format
+        if extra_body:
+            kwargs["extra_body"] = extra_body
 
         # Accumulators
         content_parts: list[str] = []
@@ -642,6 +702,14 @@ class LLMClient:
         try:
             stream = await self._client.chat.completions.create(**kwargs)
         except APIStatusError as exc:
+            if (field := self._note_rejected(exc, extra_body)) is not None:
+                return await self._chat_stream(
+                    openai_messages,
+                    tools_payload,
+                    response_format,
+                    on_chunk,
+                    _without(extra_body, field),
+                )
             raise _status_error(exc, self._model, "LLM") from exc
         except APIConnectionError as exc:
             raise LLMError(f"LLM connection failed: {exc}", model=self._model) from exc

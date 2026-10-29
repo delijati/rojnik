@@ -145,3 +145,128 @@ async def test_unshared_client_owns_and_closes_its_pool() -> None:
     assert own.is_closed()
     assert not shared._client.is_closed()
     await close_shared_clients()
+
+
+# ── Extra request fields (e.g. prompt_cache_key) ────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _forget_rejected_fields() -> Any:
+    from rojnik.llm import client as client_module
+
+    client_module._REJECTED_FIELDS.clear()
+    yield
+    client_module._REJECTED_FIELDS.clear()
+
+
+def _status_error(status: int, detail: str) -> Any:
+    from openai import APIStatusError, BadRequestError
+
+    cls = BadRequestError if status == 400 else APIStatusError
+    error = cls.__new__(cls)
+    error.status_code = status
+    error.body = {"detail": detail}
+    error.message = f"Error code: {status} - {error.body}"
+    return error
+
+
+class _Recording:
+    def __init__(self, results: list[Any]) -> None:
+        self.results = results
+        self.calls: list[dict[str, Any]] = []
+
+    async def create(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        result = self.results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+def _completion() -> SimpleNamespace:
+    message = SimpleNamespace(content="ok", tool_calls=None)
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=message, finish_reason="stop")],
+        usage=_usage(),
+        model="m",
+    )
+
+
+def _recording_client(results: list[Any], model: str = "m", **kwargs: Any) -> LLMClient:
+    client = LLMClient(api_key="k", model=model, base_url="https://llm.example/v1", **kwargs)
+    client._retry_wait = 0
+    client._client = SimpleNamespace(chat=SimpleNamespace(completions=_Recording(results)))
+    return client
+
+
+def _calls(client: LLMClient) -> list[dict[str, Any]]:
+    return client._client.chat.completions.calls
+
+
+async def test_extra_body_is_sent_and_merged_per_call() -> None:
+    client = _recording_client(
+        [_completion(), _completion()], extra_body={"prompt_cache_key": "chat:o1", "a": 1}
+    )
+
+    await client.chat([UserMessage(content="hi")])
+    await client.chat([UserMessage(content="hi")], extra_body={"prompt_cache_key": "chat:o2"})
+
+    first, second = _calls(client)
+    assert first["extra_body"] == {"prompt_cache_key": "chat:o1", "a": 1}
+    assert second["extra_body"] == {"prompt_cache_key": "chat:o2", "a": 1}
+
+
+async def test_without_extra_body_nothing_extra_is_sent() -> None:
+    client = _recording_client([_completion()])
+    await client.chat([UserMessage(content="hi")])
+    assert "extra_body" not in _calls(client)[0]
+
+
+@pytest.mark.parametrize("status", [400, 422])
+async def test_rejected_extra_field_is_dropped_remembered_and_retried_once(status: int) -> None:
+    rejection = _status_error(status, "Extra inputs are not permitted: prompt_cache_key")
+    client = _recording_client(
+        [rejection, _completion(), _completion()], extra_body={"prompt_cache_key": "k"}
+    )
+
+    response = await client.chat([UserMessage(content="hi")])
+    await client.chat([UserMessage(content="hi")])
+
+    assert response.content == "ok"
+    sent = [call.get("extra_body") for call in _calls(client)]
+    assert sent == [{"prompt_cache_key": "k"}, None, None]
+    same_endpoint = _recording_client([_completion()], extra_body={"prompt_cache_key": "k"})
+    await same_endpoint.chat([UserMessage(content="hi")])
+    assert "extra_body" not in _calls(same_endpoint)[0], "remembered per endpoint and model"
+    other_model = _recording_client(
+        [_completion()], model="other", extra_body={"prompt_cache_key": "k"}
+    )
+    await other_model.chat([UserMessage(content="hi")])
+    assert _calls(other_model)[0]["extra_body"] == {"prompt_cache_key": "k"}
+
+
+async def test_other_client_errors_keep_the_field_and_raise() -> None:
+    from rojnik.llm import LLMError
+
+    client = _recording_client(
+        [_status_error(400, "messages must not be empty")], extra_body={"prompt_cache_key": "k"}
+    )
+
+    with pytest.raises(LLMError):
+        await client.chat([UserMessage(content="hi")])
+
+    assert len(_calls(client)) == 1
+    assert client._extra_fields(None) == {"prompt_cache_key": "k"}
+
+
+async def test_stream_drops_a_rejected_field_and_retries() -> None:
+    stream = _Stream([_chunk("ok"), _chunk(usage=_usage())])
+    client = _recording_client(
+        [_status_error(422, "prompt_cache_key: extra fields not permitted"), stream],
+        extra_body={"prompt_cache_key": "k"},
+    )
+
+    response = await client.chat([UserMessage(content="hi")], on_chunk=lambda _text: None)
+
+    assert response.content == "ok"
+    assert [call.get("extra_body") for call in _calls(client)] == [{"prompt_cache_key": "k"}, None]

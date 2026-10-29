@@ -300,6 +300,17 @@ A stream is closed even when the caller aborts it, so its connection returns to 
 prompt cache (`prompt_tokens_details.cached_tokens`, DeepSeek `prompt_cache_hit_tokens`);
 it is `0` when the provider does not report it.
 
+Provider-specific request fields go into `extra_body`, on the client or per call, e.g. a
+prompt cache key that routes related requests to the same cache (Mistral, OpenAI):
+
+```python
+client = LLMClient(model="mistral-medium-3-5", extra_body={"prompt_cache_key": "chat:o1"})
+reply = await client.chat(messages, extra_body={"prompt_cache_key": "chat:o2"})  # per call
+```
+
+If an endpoint rejects a field (400/422 naming it), rojnik drops it, remembers that for the
+endpoint and model, and retries the request once without it.
+
 ## MCP
 
 Install the optional dependency, then convert a connected MCP session's tools:
