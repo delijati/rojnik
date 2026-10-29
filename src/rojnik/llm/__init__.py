@@ -12,6 +12,7 @@ from rojnik.llm.schemas import (
     ToolParameterSchema,
     ToolResultMessage,
     ToolSchema,
+    Transcription,
     UserMessage,
 )
 
@@ -31,5 +32,6 @@ __all__ = [
     "ToolParameterSchema",
     "ToolResultMessage",
     "ToolSchema",
+    "Transcription",
     "UserMessage",
 ]

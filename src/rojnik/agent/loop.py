@@ -14,7 +14,8 @@ Loop flow
         - dispatch ALL tool calls concurrently (asyncio.gather)
         - persist tool results
         - append assistant + tool result messages
-        - loop back to step 2
+        - if ``finish_after_tools`` returns a text → persist, return it
+        - otherwise loop back to step 2
 4.  If iteration >= max_iterations → persist with status "max_iterations", raise.
 """
 
@@ -30,6 +31,7 @@ from rojnik.config import settings
 from rojnik.llm.schemas import (
     AssistantMessage,
     ResponseFormat,
+    ToolCallPart,
     ToolResultMessage,
     UserMessage,
 )
@@ -46,6 +48,14 @@ class MaxIterationsError(Exception):
     """Raised when the agent loop exceeds the configured iteration limit."""
 
 
+FinishAfterTools = Callable[[str | None, list[ToolCallPart], list[str]], str | None]
+"""``(assistant_content, tool_calls, results) -> final text or None``.
+
+Called after every tool round with the round's results in call order. Returning a
+string ends the run with that text instead of another LLM call (e.g. when the host
+can answer the round itself); ``None`` continues the loop."""
+
+
 async def run_loop(
     *,
     state: RunState,
@@ -58,6 +68,7 @@ async def run_loop(
     on_chunk: Callable[[str], None] | None = None,
     on_tool_call: Callable[[str, str], None] | None = None,
     response_format: ResponseFormat = None,
+    finish_after_tools: FinishAfterTools | None = None,
 ) -> str:
     """
     Execute the ReAct loop for one agent run.
@@ -80,6 +91,9 @@ async def run_loop(
                      multi-agent graph when stored on the Agent instance.
     response_format: Optional structured-output constraint forwarded to the
                      LLM on every call.  See ``LLMClient.chat()`` for details.
+    finish_after_tools: Optional callback after each tool round (see
+                     ``FinishAfterTools``); a returned text completes the run
+                     without a further LLM call.
 
     Returns
     -------
@@ -132,29 +146,7 @@ async def run_loop(
         # Stop — we have a final answer
         # ----------------------------------------------------------------
         if response.finish_reason == "stop":
-            final = response.content or ""
-            assistant_msg = AssistantMessage(content=final)
-            await store.add_message(state.session_id, assistant_msg)
-
-            state.status = "completed"
-            state.result = final
-
-            await store.close_session(
-                state.session_id,
-                status="completed",
-                result=final,
-                total_tokens=state.total_tokens,
-            )
-
-            logger.info(
-                "loop.done",
-                agent=state.agent_name,
-                session_id=state.session_id,
-                iterations=state.iteration,
-                total_tokens=state.total_tokens,
-                result_preview=final[:120],
-            )
-            return final
+            return await _complete(store, state, response.content or "")
 
         # ----------------------------------------------------------------
         # Tool calls — dispatch all concurrently, then loop
@@ -218,6 +210,15 @@ async def run_loop(
                 )
                 await store.add_message(state.session_id, tool_result_msg)
 
+            if finish_after_tools is not None:
+                final_after = finish_after_tools(
+                    response.content,
+                    list(response.tool_calls),
+                    [result_str for _call_id, result_str in results],
+                )
+                if final_after is not None:
+                    return await _complete(store, state, final_after)
+
             # Loop back for the next LLM call
             continue
 
@@ -271,3 +272,25 @@ async def run_loop(
     raise MaxIterationsError(
         f"Agent {state.agent_name!r} exceeded {limit} iterations (session {state.session_id})."
     )
+
+
+async def _complete(store: MemoryStore, state: RunState, final: str) -> str:
+    """Persist the final answer and close the session as completed."""
+    await store.add_message(state.session_id, AssistantMessage(content=final))
+    state.status = "completed"
+    state.result = final
+    await store.close_session(
+        state.session_id,
+        status="completed",
+        result=final,
+        total_tokens=state.total_tokens,
+    )
+    logger.info(
+        "loop.done",
+        agent=state.agent_name,
+        session_id=state.session_id,
+        iterations=state.iteration,
+        total_tokens=state.total_tokens,
+        result_preview=final[:120],
+    )
+    return final

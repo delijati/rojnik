@@ -42,6 +42,7 @@ from rojnik.llm.schemas import (
     TextPart,
     ToolCallPart,
     ToolSchema,
+    Transcription,
     UserMessage,
     normalize_response_format,
 )
@@ -161,9 +162,33 @@ async def close_shared_clients() -> None:
         await client.close()
 
 
+# A rate limit (429) is waited out longer than other transient failures: on top of
+# `max_retries`, this many more attempts, each honouring the server's Retry-After and capped.
+_RATE_LIMIT_EXTRA_ATTEMPTS = 4
+_MAX_RETRY_WAIT_SECONDS = 30.0
+
+
+def _retry_after(exc: Exception | None) -> float | None:
+    """Seconds the server asked us to wait (``retry-after-ms`` or ``retry-after``)."""
+    headers = getattr(getattr(exc, "response", None), "headers", None)
+    if not headers:
+        return None
+    for name, scale in (("retry-after-ms", 0.001), ("retry-after", 1.0)):
+        try:
+            value = headers.get(name)
+            if value is not None:
+                return max(0.0, float(value) * scale)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 # Extra request fields an endpoint rejected, per (base_url, model): sent once, then dropped
 # for every later request of the process (e.g. `prompt_cache_key` on a gateway without it).
 _REJECTED_FIELDS: dict[tuple[str | None, str], set[str]] = {}
+# Endpoints (base_url, model) that rejected native json_schema output: every later client of
+# the process puts the schema into the prompt right away instead of paying one 400 each.
+_SCHEMA_IN_PROMPT: set[tuple[str | None, str]] = set()
 
 
 def _rejected_field(exc: APIStatusError, extra_body: dict[str, Any] | None) -> str | None:
@@ -240,6 +265,32 @@ def _messages_to_openai(messages: list[Message]) -> list[dict[str, Any]]:
     return result
 
 
+def _audio_seconds(response: Any) -> float | None:
+    """Billed audio duration of a transcription response, if the provider reports one."""
+    if isinstance(response, str):
+        return None
+    usage = getattr(response, "usage", None)
+    if isinstance(response, dict):
+        usage = response.get("usage")
+    candidates: list[Any] = []
+    for name in ("seconds", "prompt_audio_seconds"):
+        candidates.append(
+            usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
+        )
+    candidates.append(
+        response.get("duration")
+        if isinstance(response, dict)
+        else getattr(response, "duration", None)
+    )
+    for value in candidates:
+        try:
+            if value is not None and float(value) >= 0:
+                return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 class LLMClient:
     """
     Thin async wrapper around any OpenAI-compatible Chat Completions API.
@@ -301,7 +352,9 @@ class LLMClient:
 
         resolved_api_key = api_key or settings.get_api_key()
 
-        client_kwargs: dict[str, Any] = {"api_key": resolved_api_key}
+        # The SDK would retry 2× by itself before our own retry loop retries again; rojnik
+        # owns retries (counted, logged, with back-off), so the SDK never retries.
+        client_kwargs: dict[str, Any] = {"api_key": resolved_api_key, "max_retries": 0}
         if resolved_base_url:
             client_kwargs["base_url"] = resolved_base_url
         if timeout is not None:
@@ -312,9 +365,6 @@ class LLMClient:
         self._own_client: AsyncOpenAI | None = None
         self._client_override: Any = None
         self._extra_body = dict(extra_body or {})
-        # ponytail: per-instance memory, so every new client pays one rejected request;
-        # upgrade path: a capability cache shared per (base_url, model).
-        self._schema_in_prompt = False
 
         logger.debug(
             "llm.client.created",
@@ -322,6 +372,25 @@ class LLMClient:
             provider=settings.provider,
             base_url=resolved_base_url or "https://api.openai.com/v1",
         )
+
+    def _retry_delay(self, failure: int, exc: Exception | None = None) -> float:
+        """Exponential back-off for the n-th failure, at least the server's Retry-After,
+        never more than ``_MAX_RETRY_WAIT_SECONDS``."""
+        wait = max(self._retry_wait * (2 ** (failure - 1)), _retry_after(exc) or 0.0)
+        return min(wait, _MAX_RETRY_WAIT_SECONDS)
+
+    @property
+    def _schema_in_prompt(self) -> bool:
+        """This endpoint and model need the schema in the prompt (remembered per process)."""
+        return (self._client_kwargs.get("base_url"), self._model) in _SCHEMA_IN_PROMPT
+
+    @_schema_in_prompt.setter
+    def _schema_in_prompt(self, value: bool) -> None:
+        key = (self._client_kwargs.get("base_url"), self._model)
+        if value:
+            _SCHEMA_IN_PROMPT.add(key)
+        else:
+            _SCHEMA_IN_PROMPT.discard(key)
 
     @property
     def _client(self) -> Any:
@@ -450,7 +519,8 @@ class LLMClient:
         extra_body: dict[str, Any] | None = None,
     ) -> LLMResponse:
         last_error: Exception | None = None
-        for attempt in range(1, self._max_retries + 2):  # +2 so last attempt is attempt N+1
+        failures = rate_limits = 0
+        for attempt in range(1, self._max_retries + _RATE_LIMIT_EXTRA_ATTEMPTS + 2):
             t0 = time.perf_counter()
             try:
                 kwargs: dict[str, Any] = {
@@ -511,7 +581,10 @@ class LLMClient:
 
             except RateLimitError as exc:
                 last_error = exc
-                wait = self._retry_wait * (2 ** (attempt - 1))
+                rate_limits += 1
+                if rate_limits > self._max_retries + _RATE_LIMIT_EXTRA_ATTEMPTS:
+                    break
+                wait = self._retry_delay(rate_limits, exc)
                 logger.warning(
                     "llm.rate_limit — retrying",
                     attempt=attempt,
@@ -521,7 +594,10 @@ class LLMClient:
 
             except APIConnectionError as exc:
                 last_error = exc
-                wait = self._retry_wait * (2 ** (attempt - 1))
+                failures += 1
+                if failures > self._max_retries:
+                    break
+                wait = self._retry_delay(failures)
                 logger.warning(
                     "llm.connection_error — retrying",
                     attempt=attempt,
@@ -534,7 +610,10 @@ class LLMClient:
                 # 5xx errors are retryable; 4xx (except 429) are not
                 if exc.status_code >= 500:
                     last_error = exc
-                    wait = self._retry_wait * (2 ** (attempt - 1))
+                    failures += 1
+                    if failures > self._max_retries:
+                        break
+                    wait = self._retry_delay(failures)
                     logger.warning(
                         "llm.server_error — retrying",
                         status=exc.status_code,
@@ -579,12 +658,37 @@ class LLMClient:
         content_type: str = "audio/webm",
         language: str | None = None,
         model: str | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> str:
         """Transcribe audio via an OpenAI-compatible ``/audio/transcriptions`` endpoint.
 
         Same retry policy as :meth:`chat` (rate limits, connection errors, 5xx).
-        Returns the plain transcript text.
+        Returns the plain transcript text; :meth:`transcribe_detailed` also returns the
+        billed audio duration.
         """
+        result = await self.transcribe_detailed(
+            audio,
+            filename=filename,
+            content_type=content_type,
+            language=language,
+            model=model,
+            extra_body=extra_body,
+        )
+        return result.text
+
+    async def transcribe_detailed(
+        self,
+        audio: bytes,
+        *,
+        filename: str = "audio.webm",
+        content_type: str = "audio/webm",
+        language: str | None = None,
+        model: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+    ) -> Transcription:
+        """Like :meth:`transcribe`, with the audio seconds the provider reports (JSON
+        response: ``usage.seconds``, ``usage.prompt_audio_seconds`` or ``duration``).
+        ``extra_body``: provider fields such as Mistral ``context_bias`` (key terms)."""
         model_name = model or self._model
         safe_name = filename.replace("\\", "/").rsplit("/", 1)[-1] or "audio.webm"
         last_error: Exception | None = None
@@ -593,21 +697,34 @@ class LLMClient:
                 kwargs: dict[str, Any] = {
                     "model": model_name,
                     "file": (safe_name, audio, content_type),
-                    "response_format": "text",
+                    "response_format": "json",
                 }
                 if language:
                     kwargs["language"] = language
+                if extra_body:
+                    kwargs["extra_body"] = extra_body
                 response = await self._client.audio.transcriptions.create(**kwargs)
-                text = response if isinstance(response, str) else getattr(response, "text", "")
+                if isinstance(response, str):
+                    text = response
+                elif isinstance(response, dict):
+                    text = response.get("text") or ""
+                else:
+                    text = getattr(response, "text", "")
                 logger.debug("llm.transcribe", model=model_name, attempt=attempt)
-                return str(text).strip()
+                return Transcription(
+                    text=str(text or "").strip(),
+                    audio_seconds=_audio_seconds(response),
+                    model=model_name,
+                )
             except (RateLimitError, APIConnectionError) as exc:
                 last_error = exc
             except APIStatusError as exc:
                 if exc.status_code < 500:
                     raise _status_error(exc, model_name, "ASR") from exc
                 last_error = exc
-            wait = self._retry_wait * (2 ** (attempt - 1))
+            if attempt > self._max_retries:
+                break
+            wait = self._retry_delay(attempt, last_error)
             logger.warning("llm.transcribe — retrying", attempt=attempt, wait_s=wait)
             await asyncio.sleep(wait)
         status = last_error.status_code if isinstance(last_error, APIStatusError) else None
@@ -649,7 +766,7 @@ class LLMClient:
                     raise _status_error(exc, self._model, "OCR") from exc
                 last_error = exc
             if attempt < self._max_retries:
-                await asyncio.sleep(self._retry_wait * (2**attempt))
+                await asyncio.sleep(self._retry_delay(attempt + 1, last_error))
         status = last_error.status_code if isinstance(last_error, APIStatusError) else None
         raise LLMError(
             f"OCR failed after {self._max_retries} retries: {last_error}",

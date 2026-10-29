@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 from openai import APIConnectionError, APIStatusError, BadRequestError
 
@@ -157,6 +158,35 @@ async def test_ocr_preserves_access_error_without_retry() -> None:
     assert len(transport.calls) == 1
 
 
+@pytest.fixture(autouse=True)
+def _forget_schema_fallbacks() -> Any:
+    from rojnik.llm import client as client_module
+
+    client_module._SCHEMA_IN_PROMPT.clear()
+    yield
+    client_module._SCHEMA_IN_PROMPT.clear()
+
+
+async def test_schema_fallback_is_remembered_per_endpoint_and_model() -> None:
+    schema = {"type": "json_schema", "json_schema": {"name": "a", "schema": {"type": "object"}}}
+    rejected = _status_error(400, 'tool_choice: type "tool" and "any" are not supported')
+    first = _client(chat=[rejected, _completion('{"a": 1}')])
+    await first.chat([UserMessage(content="x")], response_format=schema)
+
+    later = _client(chat=[_completion('{"a": 2}')])
+    await later.chat([UserMessage(content="y")], response_format=schema)
+    other = LLMClient(api_key="test", model="other-model", base_url="https://llm.example/v1")
+
+    assert "response_format" not in later._client.chat.completions.calls[0]  # noqa: SLF001
+    assert not other._schema_in_prompt  # noqa: SLF001
+
+
+def test_the_sdk_never_retries_on_its_own() -> None:
+    client = LLMClient(api_key="test", model="m", base_url="https://llm.example/v1")
+    assert client._client_kwargs["max_retries"] == 0  # noqa: SLF001
+    assert client._client.max_retries == 0  # noqa: SLF001
+
+
 async def test_rejected_json_schema_falls_back_to_schema_in_prompt_once() -> None:
     rejected = _status_error(400, 'tool_choice: type "tool" and "any" are not supported')
     client = _client(
@@ -250,7 +280,28 @@ async def test_transcribe_sends_file_and_language_and_returns_text() -> None:
     assert call["model"] == "whisper-1"
     assert call["file"] == ("diktat.webm", b"audio", "audio/webm")
     assert call["language"] == "de"
-    assert call["response_format"] == "text"
+    assert call["response_format"] == "json"
+
+
+@pytest.mark.parametrize(
+    ("response", "seconds"),
+    [
+        (SimpleNamespace(text="a", usage=SimpleNamespace(type="duration", seconds=12)), 12.0),
+        ({"text": "a", "usage": {"prompt_audio_seconds": 7.5}}, 7.5),
+        (SimpleNamespace(text="a", duration=3.25), 3.25),
+        (SimpleNamespace(text="a"), None),
+        ("plain text", None),
+    ],
+)
+async def test_transcribe_detailed_reports_the_billed_audio_seconds(
+    response: Any, seconds: float | None
+) -> None:
+    client = _client(audio=[response])
+
+    result = await client.transcribe_detailed(b"audio", model="voxtral")
+
+    assert result.audio_seconds == seconds and result.model == "voxtral"
+    assert result.text == ("plain text" if isinstance(response, str) else "a")
 
 
 async def test_transcribe_retries_connection_errors_and_maps_client_errors() -> None:
@@ -262,3 +313,48 @@ async def test_transcribe_retries_connection_errors_and_maps_client_errors() -> 
         await rejected.transcribe(b"a", model="whisper-1")
     assert (caught.value.status, caught.value.model) == (413, "whisper-1")
     assert "ASR 413" in caught.value.message
+
+
+def _rate_limited(retry_after: str | None = None) -> Any:
+    from openai import RateLimitError
+
+    headers = {"retry-after": retry_after} if retry_after is not None else {}
+    response = httpx.Response(429, headers=headers, request=httpx.Request("POST", "https://x"))
+    return RateLimitError("rate limited", response=response, body=None)
+
+
+async def test_rate_limits_are_waited_out_longer_than_other_failures() -> None:
+    """Without the SDK's own retries, a 429 gets extra attempts (and its Retry-After)."""
+    client = _client(chat=[_rate_limited()] * 4 + [_completion("ok")])
+    client._max_retries = 1  # noqa: SLF001
+
+    reply = await client.chat([UserMessage(content="x")])
+
+    assert reply.content == "ok"
+    assert len(client._client.chat.completions.calls) == 5  # noqa: SLF001
+
+    exhausted = _client(chat=[_rate_limited()] * 20)
+    exhausted._max_retries = 1  # noqa: SLF001
+    with pytest.raises(LLMError) as caught:
+        await exhausted.chat([UserMessage(content="x")])
+    assert caught.value.status == 429
+    assert len(exhausted._client.chat.completions.calls) == 1 + 1 + 4  # noqa: SLF001
+
+
+def test_retry_delay_honours_retry_after_and_is_capped() -> None:
+    client = LLMClient(api_key="t", model="m", base_url="https://llm.example/v1")
+    client._retry_wait = 2  # noqa: SLF001
+    assert client._retry_delay(1) == 2  # noqa: SLF001
+    assert client._retry_delay(3) == 8  # noqa: SLF001
+    assert client._retry_delay(1, _rate_limited("12")) == 12  # noqa: SLF001
+    assert client._retry_delay(9) == 30, "höchstens 30 s"  # noqa: SLF001
+    assert client._retry_delay(1, _rate_limited("soon")) == 2  # noqa: SLF001
+
+
+async def test_transcribe_forwards_provider_fields_such_as_context_bias() -> None:
+    client = _client(audio=[SimpleNamespace(text="Steingasse")])
+
+    await client.transcribe(b"a", extra_body={"context_bias": ["Steingasse", "Convini_UK"]})
+
+    call = client._client.audio.transcriptions.calls[0]  # noqa: SLF001
+    assert call["extra_body"] == {"context_bias": ["Steingasse", "Convini_UK"]}

@@ -37,7 +37,7 @@ from typing import Any, Literal
 
 from loguru import logger
 
-from rojnik.agent.loop import run_loop
+from rojnik.agent.loop import FinishAfterTools, run_loop
 from rojnik.agent.state import RunState
 from rojnik.llm.client import LLMClient
 from rojnik.llm.schemas import ResponseFormat, SystemMessage
@@ -156,6 +156,7 @@ class Agent:
         *,
         on_chunk: Callable[[str], None] | None = None,
         response_format: ResponseFormat = None,
+        finish_after_tools: FinishAfterTools | None = None,
     ) -> str:
         """
         Execute one task through the ReAct loop.
@@ -173,6 +174,9 @@ class Agent:
         response_format:
             Optional structured-output constraint forwarded to the LLM on
             every call.  See ``LLMClient.chat()`` for details.
+        finish_after_tools:
+            Optional callback after each tool round; a returned text ends the
+            run without another LLM call.  See ``rojnik.agent.loop.FinishAfterTools``.
 
         Returns
         -------
@@ -216,6 +220,7 @@ class Agent:
                 on_chunk=on_chunk,
                 on_tool_call=self._on_tool_call,
                 response_format=response_format,
+                finish_after_tools=finish_after_tools,
             )
         except asyncio.CancelledError:
             state.status = "cancelled"

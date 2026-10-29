@@ -224,3 +224,18 @@ class TestAgentSkills:
 
         assert agent.skills == ()
         assert agent.tool_registry.names() == []
+
+
+class TestAgentFinishAfterTools:
+    async def test_agent_forwards_the_callback(self, store):
+        @tool(description="noop")
+        async def noop() -> str:
+            return "ok"
+
+        llm = MockLLMClient([tool_call_response([("c1", "noop", "{}")])])
+        agent = Agent(name="finisher", system_prompt="x", tools=[noop], llm=llm)
+
+        result = await agent.run("go", finish_after_tools=lambda content, calls, results: "Done.")
+
+        assert result == "Done." and len(llm.calls) == 1
+        assert (await _only_session(store)).status == "completed"

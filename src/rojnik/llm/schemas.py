@@ -118,6 +118,16 @@ class LLMResponse(BaseModel):
         return self.finish_reason == "tool_calls" and bool(self.tool_calls)
 
 
+class Transcription(BaseModel):
+    """Result of one transcription: the text and, when the provider reports it, the audio
+    duration it billed (``usage.seconds``, Mistral ``usage.prompt_audio_seconds`` or
+    ``duration``); ``None`` when unknown."""
+
+    text: str
+    audio_seconds: float | None = None
+    model: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Tool schema (OpenAI function-calling format)
 # ---------------------------------------------------------------------------

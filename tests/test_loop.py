@@ -535,3 +535,54 @@ class TestOnToolCall:
             on_tool_call=None,
         )
         assert result == "ok"
+
+
+class TestFinishAfterTools:
+    async def test_returned_text_ends_the_run_without_another_llm_call(self, store):
+        @tool(description="save")
+        async def save(value: int) -> str:
+            return f"saved {value}"
+
+        seen = []
+
+        def finish(content, calls, results):
+            seen.append((content, [call.name for call in calls], results))
+            return "Gespeichert."
+
+        llm = MockLLMClient([tool_call_response([("c1", "save", '{"value": 3}')])])
+        state = await _make_state(store)
+        result = await run_loop(
+            state=state,
+            task="save 3",
+            llm=llm,
+            tool_registry=_registry_with(save),
+            store=store,
+            context_builder=ContextBuilder(),
+            finish_after_tools=finish,
+        )
+
+        assert result == "Gespeichert."
+        assert len(llm.calls) == 1
+        assert seen == [(None, ["save"], ["saved 3"])]
+        assert state.status == "completed"
+        messages = await store.get_messages(state.session_id)
+        assert messages[-1].role == "assistant" and messages[-1].content == "Gespeichert."
+
+    async def test_none_continues_the_loop(self, store):
+        @tool(description="read")
+        async def read() -> str:
+            return "data"
+
+        llm = MockLLMClient([tool_call_response([("c1", "read", "{}")]), stop_response("Fertig.")])
+        state = await _make_state(store)
+        result = await run_loop(
+            state=state,
+            task="read",
+            llm=llm,
+            tool_registry=_registry_with(read),
+            store=store,
+            context_builder=ContextBuilder(),
+            finish_after_tools=lambda content, calls, results: None,
+        )
+
+        assert result == "Fertig." and len(llm.calls) == 2

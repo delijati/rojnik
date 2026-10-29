@@ -255,6 +255,20 @@ result = await agent.run(
 
 `result` remains the provider's final text, typically JSON when a structured response format is used.
 
+## Ending A Run After Tools
+
+`finish_after_tools(content, tool_calls, results)` is called after every tool round. Return
+a string to complete the run with that text instead of another LLM call (for example when
+every tool in the round already did everything the host needs to report); return `None` to
+continue the loop.
+
+```python
+def finish(content, calls, results):
+    return "Saved." if all(result.startswith("saved") for result in results) else None
+
+result = await agent.run("Save the value", finish_after_tools=finish)
+```
+
 ## Images And Audio
 
 `LLMClient` is the single model gateway, so applications never need the provider SDK:
@@ -284,9 +298,19 @@ text = await client.transcribe(
 )
 ```
 
+Provider fields go into `extra_body`, e.g. Mistral key terms:
+`await client.transcribe(audio, extra_body={"context_bias": ["Steingasse", "Convini_UK"]})`.
+`transcribe_detailed()` takes the same arguments and returns a `Transcription` with `text`
+and `audio_seconds` (the billed duration when the provider reports it in its JSON response:
+`usage.seconds`, Mistral `usage.prompt_audio_seconds` or `duration`; otherwise `None`).
+
 Images are converted to OpenAI `image_url` data URLs; memory and token counting use
 `UserMessage.text` (images omitted). Client errors (4xx) and exhausted retries raise
-`LLMError` with `status` and `model`.
+`LLMError` with `status` and `model`. rojnik owns retries (`max_retries`, exponential back-off capped at 30 s); the provider
+SDK is created with `max_retries=0`, so a failing call is never retried twice over. A rate
+limit (429) gets four more attempts on top and waits at least the server's `Retry-After`. An endpoint
+that rejects native `json_schema` output gets the schema in the prompt; that is remembered
+per endpoint and model for every later client of the process.
 
 ## Connections And Prompt Cache
 
