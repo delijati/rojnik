@@ -688,7 +688,8 @@ class LLMClient:
     ) -> Transcription:
         """Like :meth:`transcribe`, with the audio seconds the provider reports (JSON
         response: ``usage.seconds``, ``usage.prompt_audio_seconds`` or ``duration``).
-        ``extra_body``: provider fields such as Mistral ``context_bias`` (key terms)."""
+        ``extra_body``: provider fields such as Mistral ``context_bias`` (key terms); a field
+        the endpoint rejects (400/422 naming it) is dropped and remembered, as for chat."""
         model_name = model or self._model
         safe_name = filename.replace("\\", "/").rsplit("/", 1)[-1] or "audio.webm"
         last_error: Exception | None = None
@@ -701,8 +702,9 @@ class LLMClient:
                 }
                 if language:
                     kwargs["language"] = language
-                if extra_body:
-                    kwargs["extra_body"] = extra_body
+                fields = self._extra_fields(extra_body) if extra_body else None
+                if fields:
+                    kwargs["extra_body"] = fields
                 response = await self._client.audio.transcriptions.create(**kwargs)
                 if isinstance(response, str):
                     text = response
@@ -720,6 +722,15 @@ class LLMClient:
                 last_error = exc
             except APIStatusError as exc:
                 if exc.status_code < 500:
+                    if (field := self._note_rejected(exc, extra_body)) is not None:
+                        return await self.transcribe_detailed(
+                            audio,
+                            filename=filename,
+                            content_type=content_type,
+                            language=language,
+                            model=model,
+                            extra_body=_without(extra_body, field),
+                        )
                     raise _status_error(exc, model_name, "ASR") from exc
                 last_error = exc
             if attempt > self._max_retries:

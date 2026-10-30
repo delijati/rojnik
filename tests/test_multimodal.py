@@ -358,3 +358,18 @@ async def test_transcribe_forwards_provider_fields_such_as_context_bias() -> Non
 
     call = client._client.audio.transcriptions.calls[0]  # noqa: SLF001
     assert call["extra_body"] == {"context_bias": ["Steingasse", "Convini_UK"]}
+
+
+async def test_transcribe_drops_a_provider_field_the_endpoint_rejects() -> None:
+    from rojnik.llm import client as client_module
+
+    client_module._REJECTED_FIELDS.clear()
+    rejected = _status_error(400, "Unrecognized request argument supplied: context_bias")
+    client = _client(audio=[rejected, SimpleNamespace(text="ok"), SimpleNamespace(text="ok")])
+
+    assert await client.transcribe(b"a", extra_body={"context_bias": ["Steingasse"]}) == "ok"
+    assert await client.transcribe(b"a", extra_body={"context_bias": ["Steingasse"]}) == "ok"
+
+    calls = client._client.audio.transcriptions.calls  # noqa: SLF001
+    assert ["extra_body" in call for call in calls] == [True, False, False]
+    client_module._REJECTED_FIELDS.clear()
